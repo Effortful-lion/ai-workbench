@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+*.tsbuildinfo
+
+# Runtime data & secrets
+data/
+.env
+.env.*
+!.env.example
+
+# Logs & processes
+.pids/
+.logs/
+.run/
+logs/
+*.log
+
+# Local overrides
+*.local
+
+# Coverage / cache
+coverage/
+.eslintcache
+.vite/
+.turbo/
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# Screenshots & temp
+.screenshots/
+tmp/
+.tmp/

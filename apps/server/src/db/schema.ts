@@ -1,0 +1,555 @@
+import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import type { HttpToolSpec } from "@aiwb/shared";
+
+/** 一期核心表（总体设计 §7），随模块开发逐步补全 */
+export const users = sqliteTable("users", {
+  id: text("id").primaryKey(),
+  username: text("username").notNull().unique(),
+  passwordHash: text("password_hash").notNull(),
+  role: text("role", { enum: ["owner", "member", "guest"] }).notNull().default("guest"),
+  profileJson: text("profile_json", { mode: "json" }).$type<Record<string, unknown>>(),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+export const sessions = sqliteTable("sessions", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  refreshToken: text("refresh_token").notNull().unique(),
+  expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
+});
+
+export const conversations = sqliteTable("conversations", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  title: text("title").notNull().default("新会话"),
+  agentId: text("agent_id"),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+export const messages = sqliteTable("messages", {
+  id: text("id").primaryKey(),
+  conversationId: text("conversation_id")
+    .notNull()
+    .references(() => conversations.id, { onDelete: "cascade" }),
+  role: text("role", { enum: ["user", "assistant", "tool"] }).notNull(),
+  content: text("content").notNull(),
+  /** 原生 function calling 扩展字段：assistant 消息带 tool_calls；tool 消息带 tool_call_id */
+  meta: text("meta", { mode: "json" }).$type<{
+    toolCalls?: { id: string; name: string; arguments: string }[];
+    toolCallId?: string;
+  } | null>(),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+export const agents = sqliteTable("agents", {
+  id: text("id").primaryKey(),
+  ownerId: text("owner_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  personaPrompt: text("persona_prompt").notNull().default(""),
+  /** 勾选的工具名子集：string[]（Tool Registry name 列表） */
+  toolsJson: text("tools_json", { mode: "json" }).$type<string[]>().notNull().default([]),
+  /** 阶段化流程（可选）：按阶段切换模型/目标 */
+  phasesJson: text("phases_json", { mode: "json" }).$type<unknown[]>().default([]),
+  /** 运行预算（可选）：超预算自动停止 */
+  budgetJson: text("budget_json", { mode: "json" }).$type<Record<string, unknown>>(),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+/** Agent 执行迹线：一次运行一条，events 以 JSON 整体落库（避免事件表行数爆炸） */
+export const agentExecutions = sqliteTable("agent_executions", {
+  id: text("id").primaryKey(),
+  ownerId: text("owner_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  agentId: text("agent_id").references(() => agents.id, { onDelete: "set null" }),
+  conversationId: text("conversation_id").references(() => conversations.id, { onDelete: "set null" }),
+  modelId: text("model_id"),
+  modelName: text("model_name").notNull().default(""),
+  phaseName: text("phase_name").notNull().default(""),
+  eventsJson: text("events_json", { mode: "json" }).$type<unknown[]>().notNull().default([]),
+  status: text("status", { enum: ["running", "done", "failed", "budget"] }).notNull().default("running"),
+  durationMs: integer("duration_ms").notNull().default(0),
+  tokensUsed: integer("tokens_used").notNull().default(0),
+  costYuan: integer("cost_yuan").notNull().default(0),
+  error: text("error"),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+export const kbDocuments = sqliteTable("kb_documents", {
+  id: text("id").primaryKey(),
+  ownerId: text("owner_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  /** 终端文件树风格的虚拟路径 ~/kb/<title> */
+  path: text("path").notNull(),
+  mime: text("mime").notNull().default("text/plain"),
+  size: integer("size").notNull().default(0),
+  status: text("status", { enum: ["embedded", "pending", "error"] })
+    .notNull()
+    .default("pending"),
+  chunkCount: integer("chunk_count").notNull().default(0),
+  error: text("error"),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+export const toolboxItems = sqliteTable("toolbox_items", {
+  id: text("id").primaryKey(),
+  ownerId: text("owner_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  /** 载体类型：link = 外链，file = 上传文件 */
+  kind: text("kind", { enum: ["link", "file"] }).notNull().default("link"),
+  /** 别名，缺省由 URL 主机名 / 文件名推导 */
+  name: text("name").notNull(),
+  /** link 用外链；file 用站内下载路径 */
+  url: text("url").notNull(),
+  /** 文件类工具的原文件名 */
+  fileName: text("file_name"),
+  /** 文件类工具的字节数 */
+  fileSize: integer("file_size").notNull().default(0),
+  /** 文件类工具的 MIME */
+  mimeType: text("mime_type"),
+  /** 相对 data/toolbox 的存储路径，如 <id>/<file> */
+  storagePath: text("storage_path"),
+  category: text("category").notNull().default("misc"),
+  desc: text("desc").notNull().default(""),
+  useCount: integer("use_count").notNull().default(0),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+export const projects = sqliteTable("projects", {
+  id: text("id").primaryKey(),
+  ownerId: text("owner_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  /** 项目名，同时作为文档树目录名，如 ai-workbench */
+  name: text("name").notNull(),
+  title: text("title").notNull().default(""),
+  status: text("status", { enum: ["active", "paused", "done"] }).notNull().default("active"),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+export const projectDocs = sqliteTable("project_docs", {
+  id: text("id").primaryKey(),
+  projectId: text("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  /** 文件名，如 需求准备.md */
+  title: text("title").notNull(),
+  content: text("content").notNull().default(""),
+  size: integer("size").notNull().default(0),
+  /** 版本号，内容/标题每次变更 +1，为后期 git 语义预留 */
+  version: integer("version").notNull().default(1),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+export const codeRepos = sqliteTable("code_repos", {
+  id: text("id").primaryKey(),
+  ownerId: text("owner_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  /** 主语言标签，如 typescript / go / shell */
+  language: text("language").notNull().default("text"),
+  /** 当前分支，一期仅展示 */
+  branch: text("branch").notNull().default("main"),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+export const codeFiles = sqliteTable("code_files", {
+  id: text("id").primaryKey(),
+  repoId: text("repo_id")
+    .notNull()
+    .references(() => codeRepos.id, { onDelete: "cascade" }),
+  /** 相对路径，如 src/index.ts */
+  path: text("path").notNull(),
+  content: text("content").notNull().default(""),
+  size: integer("size").notNull().default(0),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+export const scheduleTasks = sqliteTable("schedule_tasks", {
+  id: text("id").primaryKey(),
+  ownerId: text("owner_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  notes: text("notes").notNull().default(""),
+  /** 地点 / 会议链接 */
+  location: text("location").notNull().default(""),
+  startsAt: integer("starts_at", { mode: "timestamp" }).notNull(),
+  durationMin: integer("duration_min").notNull().default(60),
+  /** 提醒时间；null 表示不提醒 */
+  remindAt: integer("remind_at", { mode: "timestamp" }),
+  priority: text("priority", { enum: ["low", "normal", "high"] }).notNull().default("normal"),
+  status: text("status", { enum: ["pending", "done", "canceled"] }).notNull().default("pending"),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+export const mailAccounts = sqliteTable("mail_accounts", {
+  id: text("id").primaryKey(),
+  ownerId: text("owner_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  /** 账户显示名，如「工作邮箱」 */
+  name: text("name").notNull(),
+  address: text("address").notNull(),
+  /** 来源类型：qq / 163 / gmail / outlook / custom */
+  provider: text("provider").notNull().default("custom"),
+  /** 授权码 / 应用专用密码（AES-GCM 加密存储） */
+  passwordEnc: text("password_enc"),
+  imapHost: text("imap_host").notNull().default(""),
+  imapPort: integer("imap_port").notNull().default(993),
+  imapSecure: integer("imap_secure", { mode: "boolean" }).notNull().default(true),
+  smtpHost: text("smtp_host").notNull().default(""),
+  smtpPort: integer("smtp_port").notNull().default(465),
+  smtpSecure: integer("smtp_secure", { mode: "boolean" }).notNull().default(true),
+  /** 连接状态：ok / error / untested */
+  status: text("status", { enum: ["ok", "error", "untested"] }).notNull().default("untested"),
+  lastError: text("last_error"),
+  lastSyncedAt: integer("last_synced_at", { mode: "timestamp" }),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+export const mailMessages = sqliteTable("mail_messages", {
+  id: text("id").primaryKey(),
+  ownerId: text("owner_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  accountId: text("account_id")
+    .notNull()
+    .references(() => mailAccounts.id, { onDelete: "cascade" }),
+  folder: text("folder", { enum: ["inbox", "sent", "drafts", "trash"] })
+    .notNull()
+    .default("inbox"),
+  direction: text("direction", { enum: ["inbound", "outbound"] }).notNull().default("inbound"),
+  fromName: text("from_name").notNull().default(""),
+  fromAddress: text("from_address").notNull().default(""),
+  toAddress: text("to_address").notNull().default(""),
+  subject: text("subject").notNull().default(""),
+  body: text("body").notNull().default(""),
+  /** 稳定外部标识，演示同步与真实 message id 复用 */
+  externalId: text("external_id"),
+  receivedAt: integer("received_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+  isRead: integer("is_read", { mode: "boolean" }).notNull().default(false),
+  isStarred: integer("is_starred", { mode: "boolean" }).notNull().default(false),
+  category: text("category", { enum: ["important", "subscription", "spam", "normal"] })
+    .notNull()
+    .default("normal"),
+  aiReason: text("ai_reason").notNull().default(""),
+  classifiedAt: integer("classified_at", { mode: "timestamp" }),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+export const notifications = sqliteTable("notifications", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  type: text("type", { enum: ["system", "schedule", "mail"] }).notNull().default("system"),
+  title: text("title").notNull(),
+  body: text("body").notNull().default(""),
+  isRead: integer("is_read", { mode: "boolean" }).notNull().default(false),
+  /** 关联业务 id（日程任务 / 邮件），用于跳转面板 */
+  sourceId: text("source_id"),
+  /** 扫描幂等键，如 schedule:<taskId>:<remindAt> / mail:<messageId> */
+  dedupeKey: text("dedupe_key"),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+export const commercePlans = sqliteTable("commerce_plans", {
+  id: text("id").primaryKey(),
+  ownerId: text("owner_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  /** 可选关联项目；项目删除时一并清理 */
+  projectId: text("project_id").references(() => projects.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  /** 价格（元），一期按整数记账 */
+  price: integer("price").notNull().default(0),
+  cycle: text("cycle", { enum: ["monthly", "yearly"] }).notNull().default("monthly"),
+  status: text("status", { enum: ["active", "archived"] }).notNull().default("active"),
+  /** 订阅人数，手动维护的运营数据 */
+  subscribers: integer("subscribers").notNull().default(0),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+export const commerceOrders = sqliteTable("commerce_orders", {
+  id: text("id").primaryKey(),
+  ownerId: text("owner_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  projectId: text("project_id").references(() => projects.id, { onDelete: "cascade" }),
+  /** 关联订阅方案；方案删除后流水保留 */
+  planId: text("plan_id").references(() => commercePlans.id, { onDelete: "set null" }),
+  customerName: text("customer_name").notNull(),
+  item: text("item").notNull().default(""),
+  /** 金额（元） */
+  amount: integer("amount").notNull().default(0),
+  channel: text("channel", { enum: ["alipay", "wechat", "manual", "other"] })
+    .notNull()
+    .default("manual"),
+  status: text("status", { enum: ["pending", "paid", "refunded"] }).notNull().default("pending"),
+  paidAt: integer("paid_at", { mode: "timestamp" }),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+export const commerceAds = sqliteTable("commerce_ads", {
+  id: text("id").primaryKey(),
+  ownerId: text("owner_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  projectId: text("project_id").references(() => projects.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  channel: text("channel", { enum: ["web", "social", "search", "other"] })
+    .notNull()
+    .default("web"),
+  /** 预算 / 消耗（元） */
+  budget: integer("budget").notNull().default(0),
+  spend: integer("spend").notNull().default(0),
+  status: text("status", { enum: ["planned", "active", "paused", "ended"] })
+    .notNull()
+    .default("planned"),
+  startedAt: integer("started_at", { mode: "timestamp" }),
+  endedAt: integer("ended_at", { mode: "timestamp" }),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+export const crmCustomers = sqliteTable("crm_customers", {
+  id: text("id").primaryKey(),
+  ownerId: text("owner_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  /** 可选关联项目；项目删除时一并清理 */
+  projectId: text("project_id").references(() => projects.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  company: text("company").notNull().default(""),
+  /** 联系人方式：邮箱 / 微信 / 电话 */
+  contact: text("contact").notNull().default(""),
+  stage: text("stage", { enum: ["lead", "contacted", "proposal", "negotiation", "won", "lost"] })
+    .notNull()
+    .default("lead"),
+  /** 预计成交金额（元 / 年） */
+  value: integer("value").notNull().default(0),
+  source: text("source").notNull().default(""),
+  /** 线索评分 0–100 */
+  score: integer("score").notNull().default(0),
+  notes: text("notes").notNull().default(""),
+  /** 最近一次跟进时间，由跟进记录推导 */
+  lastContactAt: integer("last_contact_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+export const crmFollowUps = sqliteTable("crm_followups", {
+  id: text("id").primaryKey(),
+  ownerId: text("owner_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  customerId: text("customer_id")
+    .notNull()
+    .references(() => crmCustomers.id, { onDelete: "cascade" }),
+  kind: text("kind", { enum: ["lead", "call", "meeting", "email", "quote", "note"] })
+    .notNull()
+    .default("note"),
+  content: text("content").notNull().default(""),
+  happenedAt: integer("happened_at", { mode: "timestamp" }).notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+/** 流水线 SOP：步骤以 JSON 落库，顺序即执行顺序 */
+export const pipeSops = sqliteTable("pipe_sops", {
+  id: text("id").primaryKey(),
+  ownerId: text("owner_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  status: text("status", { enum: ["idle", "running", "paused"] }).notNull().default("idle"),
+  /** 展示用周期文案，本期不接调度器 */
+  schedule: text("schedule").notNull().default(""),
+  /** 指定模型；为空时按状态挑选第一个可用模型 */
+  modelId: text("model_id"),
+  stepsJson: text("steps_json", { mode: "json" })
+    .$type<{ id: string; name: string; instruction: string }[]>()
+    .notNull()
+    .default([]),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+/** 流水线运行：SOP 名快照 + 输入输出 + 步骤进度 */
+export const pipeRuns = sqliteTable("pipe_runs", {
+  id: text("id").primaryKey(),
+  ownerId: text("owner_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  sopId: text("sop_id").references(() => pipeSops.id, { onDelete: "set null" }),
+  sopName: text("sop_name").notNull().default(""),
+  input: text("input").notNull().default(""),
+  output: text("output").notNull().default(""),
+  error: text("error"),
+  status: text("status", { enum: ["running", "done", "failed"] }).notNull().default("running"),
+  stepTotal: integer("step_total").notNull().default(0),
+  stepDone: integer("step_done").notNull().default(0),
+  /** 总耗时（毫秒） */
+  durationMs: integer("duration_ms").notNull().default(0),
+  startedAt: integer("started_at", { mode: "timestamp" }).notNull(),
+  finishedAt: integer("finished_at", { mode: "timestamp" }),
+});
+
+/** 运行中的单步明细：输入拼装、模型产出、失败原因 */
+export const pipeRunSteps = sqliteTable("pipe_run_steps", {
+  id: text("id").primaryKey(),
+  runId: text("run_id")
+    .notNull()
+    .references(() => pipeRuns.id, { onDelete: "cascade" }),
+  stepIndex: integer("step_index").notNull().default(0),
+  name: text("name").notNull().default(""),
+  status: text("status", { enum: ["done", "failed", "skipped"] }).notNull().default("done"),
+  input: text("input").notNull().default(""),
+  output: text("output").notNull().default(""),
+  error: text("error"),
+  durationMs: integer("duration_ms").notNull().default(0),
+});
+
+export const models = sqliteTable("models", {
+  id: text("id").primaryKey(),
+  provider: text("provider").notNull(),
+  modelName: text("model_name").notNull(),
+  endpoint: text("endpoint").notNull(),
+  /** 模型类型：chat = 对话，embedding = 向量 */
+  kind: text("kind", { enum: ["chat", "embedding"] }).notNull().default("chat"),
+  apiKeyEnc: text("api_key_enc"),
+  status: text("status", { enum: ["ok", "error", "untested"] }).notNull().default("untested"),
+  /** 输入价格（元 / 1k tokens），0 = 未知/不计费 */
+  priceIn: integer("price_in").notNull().default(0),
+  /** 输出价格（元 / 1k tokens），0 = 未知/不计费 */
+  priceOut: integer("price_out").notNull().default(0),
+  metaJson: text("meta_json", { mode: "json" }).$type<Record<string, unknown>>(),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+/**
+ * 访问统计：每条记录 = 一个 session 内的一次 page_view
+ * 口径：
+ *   - PV = COUNT(*)：每次前端路由切换（mode 变化 / panel 切换）算 1 次
+ *   - UV = COUNT(DISTINCT sessionId)：同一浏览器 session 算 1 次
+ *   - 会话时长 = MAX(endAt) - MIN(startAt) per sessionId
+ *   - 热门页面 = GROUP BY path ORDER BY COUNT(*) DESC LIMIT 10
+ *   - 7 日趋势 = GROUP BY date(createdAt) 聚合
+ */
+export const visits = sqliteTable("visits", {
+  id: text("id").primaryKey(),
+  /** 匿名访客也有 session（localStorage 生成，浏览器关闭后仍留存直到清理） */
+  sessionId: text("session_id").notNull(),
+  userId: text("user_id").references(() => users.id, { onDelete: "set null" }),
+  /** 当前页面：/ /models /agents /chat /kb ... */
+  path: text("path").notNull(),
+  /** 来源：直接输入 / 内部跳转 / 外部 URL（一期仅存） */
+  refUrl: text("ref_url"),
+  ua: text("ua").notNull().default(""),
+  /** 本页停留时长（毫秒），前端在离开时上报 */
+  durationMs: integer("duration_ms").notNull().default(0),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+/** 自定义工具：AI 自写 / 面板手工创建的声明式 HTTP 工具。
+ *  enabled=false 默认停用，人工启用后才注册进 ToolRegistry（human-in-the-loop） */
+export const customTools = sqliteTable("custom_tools", {
+  id: text("id").primaryKey(),
+  ownerId: text("owner_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  /** 强制 custom. 前缀，全局唯一（注册名） */
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  /** 工具类型：http 已实现；shell/database/mcp 为预留（数据模型先行，执行器后续迭代） */
+  kind: text("kind", { enum: ["http", "shell", "database", "mcp"] }).notNull().default("http"),
+  specJson: text("spec_json", { mode: "json" }).$type<HttpToolSpec>().notNull(),
+  argsSchemaJson: text("args_schema_json", { mode: "json" }).$type<Record<string, unknown>>(),
+  enabled: integer("enabled", { mode: "boolean" }).notNull().default(false),
+  createdBy: text("created_by", { enum: ["ai", "user"] }).notNull().default("user"),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});

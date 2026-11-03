@@ -1,0 +1,25 @@
+services:
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama_models:/root/.ollama
+    # 仅容器网络内可达，不暴露到宿主机
+    restart: unless-stopped
+
+  lightrag:
+    image: ghcr.io/hkuds/lightrag:latest
+    ports:
+      - "9621:9621"
+    env_file: .env
+    extra_hosts:
+      # 允许 LLM_BINDING_HOST 指向宿主机服务（备用）
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./data/rag_storage:/app/data/rag_storage
+      - ./data/inputs:/app/data/inputs
+    depends_on:
+      - ollama
+    restart: unless-stopped
+
+volumes:
+  ollama_models:

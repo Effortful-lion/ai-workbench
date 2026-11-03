@@ -1,0 +1,22 @@
+{
+  "name": "@aiwb/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "AI 工作台终端客户端：覆盖全部 HTTP API，供人与 Agent 使用",
+  "bin": {
+    "aiwb": "dist/cli.js"
+  },
+  "main": "dist/cli.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch"
+  },
+  "dependencies": {
+    "@aiwb/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "^6.0.3"
+  }
+}
