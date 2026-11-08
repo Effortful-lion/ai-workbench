@@ -104,6 +104,8 @@ export default function KbPanel() {
   /** 文件夹批量入库进度（终端风进度行） */
   const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number; current: string } | null>(null);
   const [bulkNote, setBulkNote] = useState<string | null>(null);
+  /** 应用内二次确认弹窗（终端风，替代 window.confirm） */
+  const [confirming, setConfirming] = useState<{ title: string; message: string; onConfirm: () => void } | null>(null);
 
   /** 查看原文：从 aiwb-kb 桶拉取归档正文（不重新向量化） */
   const [viewing, setViewing] = useState<{ id: string; title: string; content: string } | null>(null);
@@ -158,6 +160,16 @@ export default function KbPanel() {
     chatBottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [turns, asking]);
 
+  // 确认弹窗打开时 Esc 关闭
+  useEffect(() => {
+    if (!confirming) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setConfirming(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [confirming]);
+
   const ingest = async () => {
     const title = form.title.trim();
     const content = form.content;
@@ -194,7 +206,7 @@ export default function KbPanel() {
     setTab("docs");
   };
 
-  const removeDoc = async (d: KbDocumentDto) => {
+  const doRemoveDoc = async (d: KbDocumentDto) => {
     try {
       await api(`/kb/documents/${d.id}`, { method: "DELETE" });
       await reload();
@@ -202,6 +214,15 @@ export default function KbPanel() {
     } catch (e) {
       setDocsError(e instanceof Error ? e.message : String(e));
     }
+  };
+
+  /** 删除文档本体：应用内二次确认（替代 window.confirm） */
+  const removeDoc = (d: KbDocumentDto) => {
+    setConfirming({
+      title: "删除文档本体",
+      message: `《${d.title}》将从所有目录消失，向量切片一并清除。`,
+      onConfirm: () => void doRemoveDoc(d),
+    });
   };
 
   const retryDoc = async (d: KbDocumentDto) => {
@@ -286,9 +307,7 @@ export default function KbPanel() {
     }
   };
 
-  /** 删除目录：仅删视图与映射，文档本体/向量保留 */
-  const deleteFolder = async (folderId: string) => {
-    if (!window.confirm("删除目录将同时解除其下所有挂载链接（文档本体与向量保留），确认？")) return;
+  const doDeleteFolder = async (folderId: string) => {
     try {
       await api(`/kb/folders/${folderId}`, { method: "DELETE" });
       if (scopeFolderId) setScopeFolderId(null);
@@ -296,6 +315,15 @@ export default function KbPanel() {
     } catch (e) {
       setDocsError(e instanceof Error ? e.message : String(e));
     }
+  };
+
+  /** 删除目录：应用内二次确认；仅删视图与映射，文档本体/向量保留 */
+  const deleteFolder = (folderId: string) => {
+    setConfirming({
+      title: "删除目录",
+      message: "删除目录将同时解除其下所有挂载链接（文档本体与向量保留）。",
+      onConfirm: () => void doDeleteFolder(folderId),
+    });
   };
 
   /** 拖拽挂载：一份文档可挂多个目录，重复挂载服务端幂等 */
@@ -875,8 +903,7 @@ export default function KbPanel() {
                             className="text-[11px] text-tx3 hover:text-err"
                             onClick={(e) => {
                               e.stopPropagation();
-                              if (!window.confirm(`删除文档本体？《${d.title}》将从所有目录消失，向量切片一并清除。`)) return;
-                              void removeDoc(d);
+                              removeDoc(d);
                             }}
                             title="删除文档本体：源文件+全部向量+所有目录挂载"
                           >
@@ -898,6 +925,47 @@ export default function KbPanel() {
       {dragging && (
         <div className="pointer-events-none absolute inset-4 z-10 flex items-center justify-center rounded-lg border-2 border-dashed border-acc bg-bg/80 text-[13px] text-acc">
           ⤒ 松开上传：文本文件进表单 / 文件夹递归入库并重建目录树
+        </div>
+      )}
+
+      {/* 应用内二次确认弹窗（终端窗口风，替代浏览器原生 confirm） */}
+      {confirming && (
+        <div
+          className="absolute inset-0 z-30 flex items-center justify-center bg-bg/80"
+          onClick={() => setConfirming(null)}
+        >
+          <div
+            className="w-[min(440px,92%)] overflow-hidden rounded-lg border border-line bg-bg1 shadow-[0_0_24px_#00E59B18]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-2 border-b border-line bg-bg2 px-3 py-2 text-[11px] text-tx3">
+              <span className="text-err">✗</span>
+              <span>// {confirming.title}</span>
+              <button className="ml-auto text-tx3 hover:text-acc" onClick={() => setConfirming(null)}>
+                ✕
+              </button>
+            </div>
+            <div className="px-4 py-4 text-[13px] leading-relaxed text-tx">{confirming.message}</div>
+            <div className="flex items-center justify-end gap-2 border-t border-line px-4 py-3">
+              <button
+                className="rounded border border-line px-3 py-1 text-[11px] text-tx2 hover:border-acc hover:text-acc"
+                onClick={() => setConfirming(null)}
+              >
+                Esc 取消
+              </button>
+              <button
+                className="rounded border border-err/60 px-3 py-1 text-[11px] text-err hover:bg-err/10"
+                onClick={() => {
+                  const fn = confirming.onConfirm;
+                  setConfirming(null);
+                  fn();
+                }}
+                autoFocus
+              >
+                ⏎ 确认删除
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
