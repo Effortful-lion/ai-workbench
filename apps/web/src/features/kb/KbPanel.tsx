@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { KbAskMode, KbAskResultDto, KbDocumentDto } from "@aiwb/shared";
+import type {
+  KbAskMode, KbAskResultDto, KbDocumentDto, KbFolderNodeDto, KbFolderTreeDto,
+} from "@aiwb/shared";
+import KbTreeView, { KB_DOC_DRAG } from "./KbTreeView";
 import { api } from "../../lib/api";
 import { MarkdownText } from "../../lib/markdown";
 import { useAuthStore } from "../../stores/auth";
@@ -51,6 +54,10 @@ export default function KbPanel() {
   const [tab, setTab] = useState<Tab>("chat");
   const [docs, setDocs] = useState<KbDocumentDto[]>([]);
   const [docsError, setDocsError] = useState<string | null>(null);
+  const [tree, setTree] = useState<KbFolderTreeDto>({ folders: [], links: [] });
+  /** 检索范围：null=全部文档（扁平层）；目录 id=该目录（含子目录）挂载的文档 */
+  const [scopeFolderId, setScopeFolderId] = useState<string | null>(null);
+  const [dragDoc, setDragDoc] = useState<string | null>(null);
 
   const [turns, setTurns] = useState<Turn[]>([]);
   const [query, setQuery] = useState("");
@@ -63,7 +70,10 @@ export default function KbPanel() {
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
   const [showAdd, setShowAdd] = useState(false);
-  const [form, setForm] = useState({ title: "", content: "" });
+  const [form, setForm] = useState<{ title: string; content: string; folderId?: string }>({
+    title: "",
+    content: "",
+  });
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -96,6 +106,14 @@ export default function KbPanel() {
     }
   }, []);
 
+  const reloadTree = useCallback(async () => {
+    try {
+      setTree(await api<KbFolderTreeDto>("/kb/folders"));
+    } catch {
+      // 目录视图加载失败不阻塞文档列表，静默保留旧数据
+    }
+  }, []);
+
   useEffect(() => {
     void reload();
   }, [reload]);
@@ -122,11 +140,12 @@ export default function KbPanel() {
     try {
       await api("/kb/documents", {
         method: "POST",
-        body: JSON.stringify({ title, content }),
+        body: JSON.stringify({ title, content, ...(form.folderId ? { folderId: form.folderId } : {}) }),
       });
       setForm({ title: "", content: "" });
       setShowAdd(false);
       await reload();
+      await reloadTree();
     } catch (e) {
       setUploadError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -152,6 +171,7 @@ export default function KbPanel() {
     try {
       await api(`/kb/documents/${d.id}`, { method: "DELETE" });
       await reload();
+      await reloadTree();
     } catch (e) {
       setDocsError(e instanceof Error ? e.message : String(e));
     }
@@ -161,6 +181,122 @@ export default function KbPanel() {
     try {
       await api(`/kb/documents/${d.id}/retry`, { method: "POST" });
       await reload();
+      await reloadTree();
+    } catch (e) {
+      setDocsError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  // ==================== 目录树操作（视图层） ====================
+
+  /** 展平目录树（用于上传表单的主归属下拉与范围路径展示） */
+  const flatFolders = (() => {
+    const out: { id: string; label: string }[] = [];
+    const walk = (nodes: KbFolderNodeDto[], prefix: string) => {
+      for (const n of nodes) {
+        out.push({ id: n.id, label: `${prefix}${n.name}/` });
+        walk(n.children, `${prefix}${n.name}/`);
+      }
+    };
+    walk(tree.folders, "");
+    return out;
+  })();
+
+  /** 当前范围（含子目录）挂载的 docId 集合；null=全局 */
+  const scopeDocIds = (() => {
+    if (scopeFolderId === null) return null;
+    const folderIds = new Set<string>([scopeFolderId]);
+    const findNode = (nodes: KbFolderNodeDto[]): KbFolderNodeDto | null => {
+      for (const n of nodes) {
+        if (n.id === scopeFolderId) return n;
+        const f = findNode(n.children);
+        if (f) return f;
+      }
+      return null;
+    };
+    const root = findNode(tree.folders);
+    if (root) {
+      const stack = [root];
+      while (stack.length) {
+        const cur = stack.pop() as KbFolderNodeDto;
+        for (const c of cur.children) {
+          folderIds.add(c.id);
+          stack.push(c);
+        }
+      }
+    }
+    return new Set(tree.links.filter((l) => folderIds.has(l.folderId)).map((l) => l.documentId));
+  })();
+
+  /** 该文档被挂载的目录数（>1 显示 ⛓ 徽标，提示软链接多挂载） */
+  const mountCount = (docId: string) => tree.links.filter((l) => l.documentId === docId).length;
+
+  /** 当前范围内可见的文档：null=全部；目录范围=挂载集合（含子目录） */
+  const inScopeDocs = scopeDocIds ? docs.filter((d) => scopeDocIds.has(d.id)) : docs;
+
+  const createFolder = async (parentId: string | null) => {
+    const name = window.prompt("目录名：");
+    if (!name?.trim()) return;
+    try {
+      await api("/kb/folders", {
+        method: "POST",
+        body: JSON.stringify({ name: name.trim(), ...(parentId ? { parentId } : {}) }),
+      });
+      await reloadTree();
+    } catch (e) {
+      setDocsError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const renameFolder = async (folderId: string) => {
+    const name = window.prompt("新目录名：");
+    if (!name?.trim()) return;
+    try {
+      await api(`/kb/folders/${folderId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ name: name.trim() }),
+      });
+      await reloadTree();
+    } catch (e) {
+      setDocsError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  /** 删除目录：仅删视图与映射，文档本体/向量保留 */
+  const deleteFolder = async (folderId: string) => {
+    if (!window.confirm("删除目录将同时解除其下所有挂载链接（文档本体与向量保留），确认？")) return;
+    try {
+      await api(`/kb/folders/${folderId}`, { method: "DELETE" });
+      if (scopeFolderId) setScopeFolderId(null);
+      await reloadTree();
+    } catch (e) {
+      setDocsError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  /** 拖拽挂载：一份文档可挂多个目录，重复挂载服务端幂等 */
+  const mountDoc = async (docId: string, folderId: string) => {
+    try {
+      await api("/kb/links", {
+        method: "POST",
+        body: JSON.stringify({ documentId: docId, folderId }),
+      });
+      await reloadTree();
+    } catch (e) {
+      setDocsError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  /** 移除链接：仅删映射行，文档本体/向量保留 */
+  const unlinkDocFromScope = async (docId: string) => {
+    if (scopeFolderId === null) return;
+    const link = tree.links.find(
+      (l) => l.documentId === docId && l.folderId === scopeFolderId,
+    );
+    if (!link) return;
+    try {
+      await api(`/kb/links/${link.id}`, { method: "DELETE" });
+      await reloadTree();
     } catch (e) {
       setDocsError(e instanceof Error ? e.message : String(e));
     }
@@ -269,6 +405,11 @@ export default function KbPanel() {
                 <div className="py-16 text-center text-[12px] leading-loose text-tx3">
                   <div className="mb-2 text-acc">▸ 检索即对话</div>
                   // 基于知识库的 {docs.filter((d) => d.status === "embedded").length} 篇已索引文档作答
+                  {scopeFolderId !== null && (
+                    <div className="mb-1 text-[10px] text-warn">
+                      // 问答为全局检索，不受目录范围限制（范围仅作用于目录检索）
+                    </div>
+                  )}
                   <br />
                   // 试试：「部署流程是什么？」「帮我总结 xxx」
                 </div>
@@ -408,15 +549,58 @@ export default function KbPanel() {
           </div>
         </>
       ) : (
-        /* 文档管理页 */
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
-          <div className="mx-auto w-[min(900px,100%)]">
+        /* 文档管理页：左目录树（视图层） + 右文档列表（存储层，扁平一份） */
+        <div className="flex min-h-0 flex-1">
+          <KbTreeView
+            tree={tree}
+            scopeFolderId={scopeFolderId}
+            canWrite={canWrite}
+            onScopeChange={setScopeFolderId}
+            onMountDoc={(docId, folderId) => void mountDoc(docId, folderId)}
+            onUnlinkDoc={(docId) => void unlinkDocFromScope(docId)}
+            onCreateFolder={(parentId) => void createFolder(parentId)}
+            onRenameFolder={(id) => void renameFolder(id)}
+            onDeleteFolder={(id) => void deleteFolder(id)}
+          />
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+            <div className="mx-auto w-[min(760px,100%)]">
+              {/* 范围指示：机器检索层始终扁平，范围只是视图过滤 */}
+              <div className="mb-3 flex items-center gap-2 text-[10px] text-tx3">
+                <span>scope:</span>
+                <span className={scopeFolderId ? "text-acc" : "text-tx2"}>
+                  {scopeFolderId
+                    ? `~/kb/${flatFolders.find((f) => f.id === scopeFolderId)?.label ?? ""}`
+                    : "全部文档（全局扁平召回）"}
+                </span>
+                {scopeFolderId && (
+                  <button className="text-tx3 hover:text-acc" onClick={() => setScopeFolderId(null)}>
+                    × 清除范围
+                  </button>
+                )}
+              </div>
             {/* 上传表单 */}
             {showAdd && (
               <div className="mb-4 rounded-lg border border-line bg-bg1 p-4 text-[12px]">
                 <div className="mb-3 text-[11px] text-tx3">
                   // 一期支持纯文本类文档；保存后自动切分（~500 字）并写入向量库
                 </div>
+                <label className="mb-3 flex items-center gap-2">
+                  <span className="w-20 flex-none text-tx3">folder:</span>
+                  <select
+                    className="flex-1 border-b border-line bg-transparent py-1 text-tx outline-none focus:border-acc"
+                    value={form.folderId ?? ""}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, folderId: e.target.value || undefined }))
+                    }
+                  >
+                    <option value="">（未归类 ~/kb/）</option>
+                    {flatFolders.map((f) => (
+                      <option key={f.id} value={f.id}>
+                        ~/kb/{f.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <label className="mb-3 flex items-center gap-2">
                   <span className="w-20 flex-none text-tx3">title:</span>
                   <input
@@ -457,36 +641,50 @@ export default function KbPanel() {
               </div>
             )}
 
-            {/* 文档树 */}
+            {/* 文档列表（存储层）：拖文档到左侧目录挂载 */}
             <div className="overflow-hidden rounded-lg border border-line bg-bg1">
               <div className="flex items-center justify-between border-b border-line px-3 py-2 text-[11px] text-tx3">
-                <span>~/kb</span>
-                <span>拖拽文本文件到面板即可上传</span>
+                <span>~/kb · {scopeDocIds ? `${scopeDocIds.size} 篇挂载` : `${docs.length} 篇`}</span>
+                <span>拖文档到左侧目录挂载 · 一份文档可挂多个目录</span>
               </div>
-              {docs.length === 0 ? (
+              {inScopeDocs.length === 0 ? (
                 <div className="px-4 py-12 text-center text-[12px] text-tx3">
-                  {docsError ? "// 知识库读取失败" : "// 知识库为空 —— 点击右上角「选文件」或「粘贴文本」"}
+                  {docsError
+                    ? "// 知识库读取失败"
+                    : scopeFolderId
+                      ? "// 该目录下暂无挂载文档 —— 把文档拖进来"
+                      : "// 知识库为空 —— 点击右上角「选文件」或「粘贴文本」"}
                 </div>
               ) : (
                 <div className="py-1">
-                  {docs.map((d, i) => (
+                  {inScopeDocs.map((d, i) => (
                     <div
                       key={d.id}
-                      className="group flex cursor-pointer items-center gap-3 px-3 py-2 text-[12px] hover:bg-bg2"
+                      className={`group flex cursor-pointer items-center gap-3 px-3 py-2 text-[12px] hover:bg-bg2 ${
+                        dragDoc === d.id ? "opacity-40" : ""
+                      }`}
+                      draggable={canWrite}
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData(KB_DOC_DRAG, d.id);
+                        e.dataTransfer.effectAllowed = "move";
+                        setDragDoc(d.id);
+                      }}
+                      onDragEnd={() => setDragDoc(null)}
                       onClick={() => void viewOriginal(d)}
                       role="button"
                       tabIndex={0}
-                      title="点击查看归档原文"
+                      title="点击查看归档原文；可拖到左侧目录挂载"
                       onKeyDown={(e) => {
                         if (e.key === "Enter") void viewOriginal(d);
                       }}
                     >
-                      <span className="text-tx3">{i === docs.length - 1 ? "└──" : "├──"}</span>
+                      <span className="text-tx3">{i === inScopeDocs.length - 1 ? "└──" : "├──"}</span>
                       <span className={STATUS_DOT[d.status]}>●</span>
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-tx">{d.title}</span>
                         <span className="block truncate text-[10px] text-tx3">
                           {d.path} · {humanSize(d.size)} · {d.chunkCount} chunks · {STATUS_LABEL[d.status]}
+                          {mountCount(d.id) > 1 && ` · ⛓ ${mountCount(d.id)} 目录挂载`}
                         </span>
                         {d.status === "error" && d.error && (
                           <span className="block truncate text-[10px] text-err">{d.error}</span>
@@ -516,13 +714,26 @@ export default function KbPanel() {
                               ↻ 重试
                             </button>
                           )}
+                          {scopeFolderId && (
+                            <button
+                              className="text-[11px] text-tx3 hover:text-warn"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void unlinkDocFromScope(d.id);
+                              }}
+                              title="移除链接：仅解除当前目录挂载，文档本体与向量保留"
+                            >
+                              ✂ 移除链接
+                            </button>
+                          )}
                           <button
                             className="text-[11px] text-tx3 hover:text-err"
                             onClick={(e) => {
                               e.stopPropagation();
+                              if (!window.confirm(`删除文档本体？《${d.title}》将从所有目录消失，向量切片一并清除。`)) return;
                               void removeDoc(d);
                             }}
-                            title="删除文档及其向量"
+                            title="删除文档本体：源文件+全部向量+所有目录挂载"
                           >
                             ✗ 删除
                           </button>
@@ -532,6 +743,7 @@ export default function KbPanel() {
                   ))}
                 </div>
               )}
+            </div>
             </div>
           </div>
         </div>
