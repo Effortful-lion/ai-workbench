@@ -216,6 +216,11 @@ export class KbService {
     userId: string,
     id: string,
   ): Promise<{ removedFolders: number; removedLinks: number }> {
+    const [target] = await this.db
+      .select({ id: kbFolders.id })
+      .from(kbFolders)
+      .where(and(eq(kbFolders.id, id), eq(kbFolders.ownerId, userId)));
+    if (!target) throw new NotFoundException("folder not found");
     const ids = [...(await this.folderSubtreeIds(userId, id))];
     const linkRows = await this.db
       .select({ id: kbLinks.id })

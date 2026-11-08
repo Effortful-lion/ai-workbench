@@ -39,3 +39,8 @@
 - 移动端（061 mobileView）下的拖拽手势适配。
 - capability 意图路由手册未含 `kb.search` 说明。
 - 前端拖拽交互的浏览器人工手测待补（构建与 API 链路已验证）。
+- `deleteFolder` 多条写语句未包事务（中途失败可能留中间态，个人库规模概率低）。
+- guest 打开 KB 面板显示"读取失败"而非无权限空态（guest 无 kb:read）。
+- operations 风险分级口径待统一（`kb.search.post` 标 write、DELETE 族分级不一致）。
+- KbPanel 已 784 行，docs Tab 建议下次拆 `KbDocsTab` 或收敛 folder 操作为自定义 hook。
+- `titlesByIds`/`folderSubtreeIds` 全表扫在多用户共享部署下需换 `inArray`/按需查询。

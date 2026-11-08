@@ -342,7 +342,8 @@ export default function KbPanel() {
       className="relative flex h-full flex-col font-mono"
       onDragOver={(e) => {
         e.preventDefault();
-        if (canWrite) setDragging(true);
+        // 内部目录拖拽（自定义 MIME）不触发文件上传遮罩
+        if (canWrite && !e.dataTransfer.types.includes(KB_DOC_DRAG)) setDragging(true);
       }}
       onDragLeave={() => setDragging(false)}
       onDrop={(e) => {
@@ -555,6 +556,7 @@ export default function KbPanel() {
             tree={tree}
             scopeFolderId={scopeFolderId}
             canWrite={canWrite}
+            dragLabel={dragDoc ? (docs.find((d) => d.id === dragDoc)?.title ?? null) : null}
             onScopeChange={setScopeFolderId}
             onMountDoc={(docId, folderId) => void mountDoc(docId, folderId)}
             onUnlinkDoc={(docId) => void unlinkDocFromScope(docId)}

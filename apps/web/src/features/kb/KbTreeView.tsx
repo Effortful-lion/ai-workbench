@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { KbFolderNodeDto, KbFolderTreeDto } from "@aiwb/shared";
 
 /** 拖拽数据类型（自定义 MIME，避免与文件上传拖拽冲突） */
@@ -14,6 +14,8 @@ interface Props {
   tree: KbFolderTreeDto;
   scopeFolderId: string | null;
   canWrite: boolean;
+  /** 正被拖拽的文档标题；null=无内部拖拽（跟随标签隐藏） */
+  dragLabel: string | null;
   onScopeChange: (folderId: string | null) => void;
   onMountDoc: (docId: string, folderId: string) => void;
   /** 拖到「⌫ 移除链接」落区触发：仅解除该文档与当前目录的挂载 */
@@ -32,8 +34,23 @@ export default function KbTreeView(props: Props) {
   const [ghost, setGhost] = useState<Ghost | null>(null);
   const ghostLabel = useRef("");
 
+  // 拖拽结束（dragLabel 置空）时隐藏跟随标签
+  useEffect(() => {
+    if (!props.dragLabel) {
+      ghostLabel.current = "";
+      setGhost(null);
+    }
+  }, [props.dragLabel]);
+
+  /** 跟随标签：等宽体 mv 命令字样，目标随悬停位置实时变化 */
   const trackGhost = (e: React.DragEvent) => {
-    if (!ghostLabel.current) return;
+    if (!props.dragLabel) return;
+    const target = overDropZone
+      ? "⌫ 移除链接"
+      : dragOverFolder
+        ? `${findFolderName(tree.folders, dragOverFolder) ?? "?"}/`
+        : "…";
+    ghostLabel.current = `mv ${props.dragLabel} → ${target}`;
     setGhost({ x: e.clientX + 14, y: e.clientY + 14, label: ghostLabel.current });
   };
 
@@ -135,6 +152,7 @@ export default function KbTreeView(props: Props) {
           onDragLeave={() => setOverDropZone(false)}
           onDrop={(e) => {
             e.preventDefault();
+            e.stopPropagation();
             setOverDropZone(false);
             const docId = readDraggedDoc(e);
             if (docId) props.onUnlinkDoc(docId);
@@ -156,6 +174,16 @@ export default function KbTreeView(props: Props) {
       )}
     </div>
   );
+}
+
+/** 在树中查找目录名（用于跟随标签的目标显示） */
+function findFolderName(nodes: KbFolderNodeDto[], id: string): string | null {
+  for (const n of nodes) {
+    if (n.id === id) return n.name;
+    const found = findFolderName(n.children, id);
+    if (found) return found;
+  }
+  return null;
 }
 
 interface RowProps {

@@ -556,6 +556,12 @@ export const KB_OPERATIONS: OperationDef[] = [
         desc: "本机纯文本文件路径，内容读入 content（与 content 二选一，≤4MB）",
       },
       { name: "mime", in: "body", type: "string", desc: "MIME，缺省 text/plain" },
+      {
+        name: "folderId",
+        in: "body",
+        type: "string",
+        desc: "主归属目录 id：写入 chunk primary_path 做路径语义增强，缺省=未归类",
+      },
     ],
   },
   {
