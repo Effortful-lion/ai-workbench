@@ -100,6 +100,7 @@ export class KbService {
       ownerId: userId,
       title,
       path: `~/kb/${title}`,
+      primaryFolderId: null,
       mime: input.mime ?? "text/plain",
       size: Buffer.byteLength(content, "utf8"),
       status: "pending",

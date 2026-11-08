@@ -10,6 +10,8 @@ export interface ChunkPayload {
   user_id: string;
   doc_title: string;
   text: string;
+  /** 主归属虚拟路径（路径语义增强，可空=存量文档未回填） */
+  primary_path?: string;
 }
 
 export interface SearchHit {
@@ -93,11 +95,21 @@ export class QdrantService implements OnModuleInit {
     if (!res.ok) throw new Error(`upsert failed: ${await res.text()}`);
   }
 
-  async search(vector: number[], userId: string, topK: number): Promise<SearchHit[]> {
+  /** 扁平向量召回：user_id 隔离必选；docIds 传入时作为目录范围过滤（match any）。
+   *  docIds 为空数组表示该范围内无文档，直接返回空结果。 */
+  async search(
+    vector: number[],
+    userId: string,
+    topK: number,
+    docIds?: string[],
+  ): Promise<SearchHit[]> {
     if (!this.ready) return [];
+    if (docIds && docIds.length === 0) return [];
     const name = this.collection(vector.length);
     const exists = await this.req(`/collections/${name}`, {}, 3000);
     if (!exists.ok) return [];
+    const must: unknown[] = [{ key: "user_id", match: { value: userId } }];
+    if (docIds?.length) must.push({ key: "doc_id", match: { any: docIds } });
     const res = await this.req(
       `/collections/${name}/points/search`,
       {
@@ -107,7 +119,7 @@ export class QdrantService implements OnModuleInit {
           vector,
           limit: topK,
           with_payload: true,
-          filter: { must: [{ key: "user_id", match: { value: userId } }] },
+          filter: { must },
         }),
       },
       10_000,
