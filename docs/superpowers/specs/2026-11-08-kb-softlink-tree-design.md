@@ -3,7 +3,7 @@
 - 日期：2026-11-08
 - 状态：待实现
 - 决策人：Lion
-- 关联：`docs/devlog/062-kb-softlink-tree.md`（实现完成后补记）
+- 关联：`docs/devlog/080-kb-softlink-tree.md`（实现完成后补记）
 
 ## 目标
 

@@ -1723,7 +1723,7 @@ git commit -m "feat(kb): docs Tab 树形视图集成 + 拖拽挂载/移除链接
 ### Task 9: 端到端验证 + 开发日志
 
 **Files:**
-- Create: `docs/devlog/062-kb-softlink-tree.md`
+- Create: `docs/devlog/080-kb-softlink-tree.md`
 
 - [ ] **Step 9.1: 全量构建**
 
@@ -1770,10 +1770,10 @@ Run: `make dev-web`，浏览器打开 `http://localhost:8701` 进入 KB 面板 d
 
 - [ ] **Step 9.4: 写开发日志**
 
-创建 `docs/devlog/062-kb-softlink-tree.md`（遵循 `docs/devlog/README.md` 模板）：
+创建 `docs/devlog/080-kb-softlink-tree.md`（遵循 `docs/devlog/README.md` 模板；编号按 devlog 现状顺延，现有最新为 079）：
 
 ```markdown
-# 062 · KB 扁平存储 + 软链接树形视图
+# 080 · KB 扁平存储 + 软链接树形视图
 
 - 日期：2026-11-08
 - 状态：已完成
@@ -1811,8 +1811,8 @@ Run: `make dev-web`，浏览器打开 `http://localhost:8701` 进入 KB 面板 d
 - [ ] **Step 9.5: Commit**
 
 ```bash
-git add docs/devlog/062-kb-softlink-tree.md
-git commit -m "docs(devlog): 062 KB 软链接树形视图开发日志"
+git add docs/devlog/080-kb-softlink-tree.md
+git commit -m "docs(devlog): 080 KB 软链接树形视图开发日志"
 ```
 
 ---
