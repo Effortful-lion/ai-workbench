@@ -6,6 +6,7 @@ import { CustomToolsService } from "./custom-tools.service";
 import { WebTools } from "./web.tools";
 import { SiteTools } from "./site.tools";
 import { SearchTools } from "./search.tools";
+import { KbTools } from "./kb.tools";
 import { ToolsController } from "./tools.controller";
 import { GithubModule } from "../github/github.module";
 import { KbModule } from "../kb/kb.module";
@@ -14,7 +15,7 @@ import { KbModule } from "../kb/kb.module";
 @Global()
 @Module({
   imports: [DiscoveryModule, GithubModule, KbModule],
-  providers: [ToolRegistry, OperationToolsService, CustomToolsService, WebTools, SiteTools, SearchTools],
+  providers: [ToolRegistry, OperationToolsService, CustomToolsService, WebTools, SiteTools, SearchTools, KbTools],
   controllers: [ToolsController],
   exports: [ToolRegistry],
 })
