@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
-  KbAskMode, KbAskResultDto, KbDocumentDto, KbFolderNodeDto, KbFolderTreeDto,
+  KbAskMode, KbAskResultDto, KbDocumentDto, KbFolderDto, KbFolderNodeDto, KbFolderTreeDto,
 } from "@aiwb/shared";
 import KbTreeView, { KB_DOC_DRAG } from "./KbTreeView";
 import { api } from "../../lib/api";
@@ -27,6 +27,30 @@ function isTextFile(f: File) {
     f.type.startsWith("text/") ||
     f.type === "application/json"
   );
+}
+
+/** 递归展开拖入的文件/目录条目为 {file, 相对路径} 列表（目录名含在相对路径里） */
+async function walkEntry(
+  entry: FileSystemEntry,
+  prefix: string,
+  out: { file: File; relPath: string }[],
+): Promise<void> {
+  if (entry.isFile) {
+    const file = await new Promise<File>((res, rej) =>
+      (entry as FileSystemFileEntry).file(res, rej),
+    );
+    out.push({ file, relPath: prefix + entry.name });
+  } else if (entry.isDirectory) {
+    const reader = (entry as FileSystemDirectoryEntry).createReader();
+    for (;;) {
+      // readEntries 每次最多返回 100 条，循环读到空为止
+      const batch = await new Promise<FileSystemEntry[]>((res, rej) =>
+        reader.readEntries(res, rej),
+      );
+      if (!batch.length) break;
+      for (const child of batch) await walkEntry(child, `${prefix}${entry.name}/`, out);
+    }
+  }
 }
 
 function humanSize(bytes: number) {
@@ -77,6 +101,9 @@ export default function KbPanel() {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
+  /** 文件夹批量入库进度（终端风进度行） */
+  const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number; current: string } | null>(null);
+  const [bulkNote, setBulkNote] = useState<string | null>(null);
 
   /** 查看原文：从 aiwb-kb 桶拉取归档正文（不重新向量化） */
   const [viewing, setViewing] = useState<{ id: string; title: string; content: string } | null>(null);
@@ -189,16 +216,16 @@ export default function KbPanel() {
 
   // ==================== 目录树操作（视图层） ====================
 
-  /** 展平目录树（用于上传表单的主归属下拉与范围路径展示） */
+  /** 展平目录树（用于上传表单的主归属下拉、范围路径展示与文件夹链重建） */
   const flatFolders = (() => {
-    const out: { id: string; label: string }[] = [];
-    const walk = (nodes: KbFolderNodeDto[], prefix: string) => {
+    const out: { id: string; parentId: string | null; label: string }[] = [];
+    const walk = (nodes: KbFolderNodeDto[], parentId: string | null, prefix: string) => {
       for (const n of nodes) {
-        out.push({ id: n.id, label: `${prefix}${n.name}/` });
-        walk(n.children, `${prefix}${n.name}/`);
+        out.push({ id: n.id, parentId, label: `${prefix}${n.name}/` });
+        walk(n.children, n.id, `${prefix}${n.name}/`);
       }
     };
-    walk(tree.folders, "");
+    walk(tree.folders, null, "");
     return out;
   })();
 
@@ -234,13 +261,12 @@ export default function KbPanel() {
   /** 当前范围内可见的文档：null=全部；目录范围=挂载集合（含子目录） */
   const inScopeDocs = scopeDocIds ? docs.filter((d) => scopeDocIds.has(d.id)) : docs;
 
-  const createFolder = async (parentId: string | null) => {
-    const name = window.prompt("目录名：");
-    if (!name?.trim()) return;
+  /** 内联表单提交：新建目录（根/子目录），不再使用 window.prompt */
+  const createFolder = async (parentId: string | null, name: string) => {
     try {
       await api("/kb/folders", {
         method: "POST",
-        body: JSON.stringify({ name: name.trim(), ...(parentId ? { parentId } : {}) }),
+        body: JSON.stringify({ name, ...(parentId ? { parentId } : {}) }),
       });
       await reloadTree();
     } catch (e) {
@@ -248,13 +274,11 @@ export default function KbPanel() {
     }
   };
 
-  const renameFolder = async (folderId: string) => {
-    const name = window.prompt("新目录名：");
-    if (!name?.trim()) return;
+  const renameFolder = async (folderId: string, name: string) => {
     try {
       await api(`/kb/folders/${folderId}`, {
         method: "PATCH",
-        body: JSON.stringify({ name: name.trim() }),
+        body: JSON.stringify({ name }),
       });
       await reloadTree();
     } catch (e) {
@@ -300,6 +324,75 @@ export default function KbPanel() {
     } catch (e) {
       setDocsError(e instanceof Error ? e.message : String(e));
     }
+  };
+
+  // ==================== 文件夹批量入库（扁平上传 + 视图层目录树重建） ====================
+
+  /** 确保 `segments` 目录链存在：逐段在当前父目录下按名查找，缺则建；返回最深目录 id。
+   *  过程用本地副本累积新目录，避免循环中间态依赖服务端树刷新。 */
+  const ensureFolderChain = async (segments: string[]): Promise<string | null> => {
+    const flat = flatFolders.map((f) => ({ id: f.id, parentId: f.parentId, name: f.label.replace(/\/$/, "").split("/").pop() ?? "" }));
+    let parentId: string | null = null;
+    for (const seg of segments) {
+      let hit = flat.find((f) => f.parentId === parentId && f.name === seg);
+      if (!hit) {
+        const created: KbFolderDto = await api<KbFolderDto>("/kb/folders", {
+          method: "POST",
+          body: JSON.stringify({ name: seg, ...(parentId ? { parentId } : {}) }),
+        });
+        hit = { id: created.id, parentId, name: seg };
+        flat.push(hit);
+      }
+      parentId = hit.id;
+    }
+    return parentId;
+  };
+
+  /** 批量入库：文档本体全部扁平上传（一份一份存），按原相对路径在视图层重建目录树并挂载 */
+  const ingestFolderFiles = async (items: { file: File; relPath: string }[]) => {
+    const usable = items.filter(({ file }) => isTextFile(file));
+    const skipped = items.length - usable.length;
+    if (!usable.length) {
+      setUploadError("文件夹内没有文本类文件（一期仅支持 .txt / .md / .csv / .json / .log / .yml）");
+      return;
+    }
+    setBulkProgress({ done: 0, total: usable.length, current: usable[0].relPath });
+    let ok = 0;
+    let fail = 0;
+    for (const { file, relPath } of usable) {
+      setBulkProgress({ done: ok + fail, total: usable.length, current: relPath });
+      try {
+        const segments = relPath.split("/").slice(0, -1);
+        const folderId = await ensureFolderChain(segments);
+        const content = await file.text();
+        await api("/kb/documents", {
+          method: "POST",
+          body: JSON.stringify({
+            title: file.name,
+            content,
+            ...(folderId ? { folderId } : {}),
+          }),
+        });
+        ok += 1;
+      } catch {
+        fail += 1;
+      }
+    }
+    await reload();
+    await reloadTree();
+    setBulkProgress(null);
+    setBulkNote(
+      `▸ 文件夹入库完成：成功 ${ok} 篇` +
+        (skipped ? ` · 跳过 ${skipped} 个非文本文件` : "") +
+        (fail ? ` · 失败 ${fail} 个` : ""),
+    );
+  };
+
+  /** 面板拖入目录条目：递归展开后走批量入库 */
+  const ingestDroppedEntries = async (entries: FileSystemEntry[]) => {
+    const out: { file: File; relPath: string }[] = [];
+    for (const en of entries) await walkEntry(en, "", out);
+    await ingestFolderFiles(out);
   };
 
   const ask = async () => {
@@ -349,7 +442,16 @@ export default function KbPanel() {
       onDrop={(e) => {
         e.preventDefault();
         setDragging(false);
-        if (canWrite) void pickFiles(e.dataTransfer.files);
+        if (!canWrite) return;
+        // 拖入文件夹：递归展开→扁平入库→视图层重建目录树
+        const entries = Array.from(e.dataTransfer.items ?? [])
+          .map((it) => it.webkitGetAsEntry())
+          .filter((en): en is FileSystemEntry => !!en);
+        if (entries.some((en) => en.isDirectory)) {
+          void ingestDroppedEntries(entries);
+          return;
+        }
+        void pickFiles(e.dataTransfer.files);
       }}
     >
       {/* 标题栏 + 页签 */}
@@ -384,6 +486,29 @@ export default function KbPanel() {
               className="hidden"
               onChange={(e) => {
                 void pickFiles(e.target.files);
+                e.target.value = "";
+              }}
+            />
+            <button
+              className="rounded border border-line px-2.5 py-1 text-[11px] text-tx2 hover:border-acc hover:text-acc"
+              onClick={() => document.getElementById("kb-folder-input")?.click()}
+              title="选择文件夹：递归扁平入库，并按原目录层级重建视图目录树"
+            >
+              ⤒ 选文件夹
+            </button>
+            <input
+              id="kb-folder-input"
+              type="file"
+              multiple
+              className="hidden"
+              {...{ webkitdirectory: "", directory: "" }}
+              onChange={(e) => {
+                const items = Array.from(e.target.files ?? []).map((f) => ({
+                  file: f,
+                  relPath: f.webkitRelativePath || f.name,
+                }));
+                setTab("docs");
+                if (items.length) void ingestFolderFiles(items);
                 e.target.value = "";
               }}
             />
@@ -554,15 +679,21 @@ export default function KbPanel() {
         <div className="flex min-h-0 flex-1">
           <KbTreeView
             tree={tree}
+            docs={docs}
             scopeFolderId={scopeFolderId}
             canWrite={canWrite}
             dragLabel={dragDoc ? (docs.find((d) => d.id === dragDoc)?.title ?? null) : null}
             onScopeChange={setScopeFolderId}
             onMountDoc={(docId, folderId) => void mountDoc(docId, folderId)}
             onUnlinkDoc={(docId) => void unlinkDocFromScope(docId)}
-            onCreateFolder={(parentId) => void createFolder(parentId)}
-            onRenameFolder={(id) => void renameFolder(id)}
+            onCreateFolder={(parentId, name) => void createFolder(parentId, name)}
+            onRenameFolder={(id, name) => void renameFolder(id, name)}
             onDeleteFolder={(id) => void deleteFolder(id)}
+            onDocOpen={(docId) => {
+              const d = docs.find((x) => x.id === docId);
+              if (d) void viewOriginal(d);
+            }}
+            onDocDrag={(docId) => setDragDoc(docId)}
           />
           <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
             <div className="mx-auto w-[min(760px,100%)]">
@@ -580,6 +711,18 @@ export default function KbPanel() {
                   </button>
                 )}
               </div>
+              {/* 文件夹批量入库进度：终端字符进度条 */}
+              {bulkProgress && (
+                <div className="mb-3 rounded border border-acc/40 bg-bg1 px-3 py-2 text-[11px] text-acc">
+                  ⠋ 扁平入库 {bulkProgress.done}/{bulkProgress.total} · {bulkProgress.current}
+                  <div className="mt-1 font-mono text-[10px] text-acc/70">
+                    [{"█".repeat(Math.round((bulkProgress.done / bulkProgress.total) * 20)).padEnd(20, "░")}]
+                  </div>
+                </div>
+              )}
+              {bulkNote && !bulkProgress && (
+                <div className="mb-3 text-[11px] text-acc">{bulkNote}</div>
+              )}
             {/* 上传表单 */}
             {showAdd && (
               <div className="mb-4 rounded-lg border border-line bg-bg1 p-4 text-[12px]">
@@ -754,7 +897,7 @@ export default function KbPanel() {
       {/* 拖拽遮罩 */}
       {dragging && (
         <div className="pointer-events-none absolute inset-4 z-10 flex items-center justify-center rounded-lg border-2 border-dashed border-acc bg-bg/80 text-[13px] text-acc">
-          ⤒ 松开以读取文本并加入上传表单
+          ⤒ 松开上传：文本文件进表单 / 文件夹递归入库并重建目录树
         </div>
       )}
 

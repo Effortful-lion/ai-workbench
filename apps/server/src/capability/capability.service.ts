@@ -52,9 +52,10 @@ export class CapabilityService implements OnModuleInit {
 
   async onModuleInit() {
     // 不阻塞启动：后台摄入能力文档（LightRAG 处理较慢，失败只打日志）
-    void this.ensureCapabilityDocs().catch((e) =>
-      this.log.warn(`ensureCapabilityDocs failed: ${(e as Error).message}`),
-    );
+    // 开发阶段 LightRAG 未配 API Key 会刷 403 告警，暂时注释（上线前恢复）
+    // void this.ensureCapabilityDocs().catch((e) =>
+    //   this.log.warn(`ensureCapabilityDocs failed: ${(e as Error).message}`),
+    // );
   }
 
   /** 把操作目录生成的能力手册灌入 LightRAG（已存在则跳过）。
