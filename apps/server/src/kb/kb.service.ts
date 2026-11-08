@@ -1,18 +1,25 @@
 import { Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
-import { and, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { readFile, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type {
   KbAskMode,
   KbAskResultDto,
+  KbCreateFolderInput,
   KbDocumentDto,
+  KbFolderDto,
+  KbFolderNodeDto,
+  KbFolderTreeDto,
   KbIngestInput,
+  KbLinkDto,
+  KbLinkInput,
   KbSearchHitDto,
   KbSearchResultDto,
+  KbUpdateFolderInput,
 } from "@aiwb/shared";
 import { DB, type Db } from "../db/db.module";
-import { kbDocuments } from "../db/schema";
+import { kbDocuments, kbFolders, kbLinks } from "../db/schema";
 import { ModelsService } from "../models/models.service";
 import { LlmAdapter } from "../llm/llm.adapter";
 import { EmbeddingService } from "./embedding.service";
@@ -70,6 +77,7 @@ export class KbService {
       status: d.status,
       chunkCount: d.chunkCount,
       error: d.error,
+      primaryFolderId: d.primaryFolderId,
       createdAt: d.createdAt.getTime(),
     };
   }
@@ -83,6 +91,251 @@ export class KbService {
     return rows.map((d) => this.toDto(d));
   }
 
+  // ==================== 目录树（视图层） ====================
+
+  /** 目录树 + 全部挂载关系。目录仅是视图容器：不持有文档本体、不向量化、不参与检索。 */
+  async listFolders(userId: string): Promise<KbFolderTreeDto> {
+    const [folderRows, linkRows] = await Promise.all([
+      this.db
+        .select()
+        .from(kbFolders)
+        .where(eq(kbFolders.ownerId, userId))
+        .orderBy(asc(kbFolders.sortOrder), asc(kbFolders.createdAt)),
+      this.db.select().from(kbLinks).where(eq(kbLinks.ownerId, userId)),
+    ]);
+    const nodes = new Map<string, KbFolderNodeDto>();
+    for (const f of folderRows) {
+      nodes.set(f.id, {
+        id: f.id,
+        parentId: f.parentId,
+        name: f.name,
+        sortOrder: f.sortOrder,
+        docCount: 0,
+        createdAt: f.createdAt.getTime(),
+        children: [],
+      });
+    }
+    for (const l of linkRows) {
+      const n = nodes.get(l.folderId);
+      if (n) n.docCount += 1;
+    }
+    const roots: KbFolderNodeDto[] = [];
+    for (const f of folderRows) {
+      const n = nodes.get(f.id);
+      if (!n) continue;
+      const parent = f.parentId ? nodes.get(f.parentId) : undefined;
+      if (parent) parent.children.push(n);
+      else roots.push(n);
+    }
+    return {
+      folders: roots,
+      links: linkRows.map((l) => ({
+        id: l.id,
+        documentId: l.documentId,
+        folderId: l.folderId,
+        createdAt: l.createdAt.getTime(),
+      })),
+    };
+  }
+
+  async createFolder(userId: string, input: KbCreateFolderInput): Promise<KbFolderDto> {
+    const name = input.name.trim();
+    if (!name) throw new Error("目录名不能为空");
+    let parentId: string | null = null;
+    if (input.parentId) {
+      const [parent] = await this.db
+        .select({ id: kbFolders.id })
+        .from(kbFolders)
+        .where(and(eq(kbFolders.id, input.parentId), eq(kbFolders.ownerId, userId)));
+      if (!parent) throw new NotFoundException("parent folder not found");
+      parentId = parent.id;
+    }
+    const [row] = await this.db
+      .insert(kbFolders)
+      .values({ id: randomUUID(), ownerId: userId, name, parentId, createdAt: new Date() })
+      .returning();
+    return {
+      id: row.id,
+      parentId: row.parentId,
+      name: row.name,
+      sortOrder: row.sortOrder,
+      docCount: 0,
+      createdAt: row.createdAt.getTime(),
+    };
+  }
+
+  /** 重命名 / 移动。移动做防环校验：目标不能是自身或自身子树中的目录。 */
+  async updateFolder(userId: string, id: string, input: KbUpdateFolderInput): Promise<KbFolderDto> {
+    const [row] = await this.db
+      .select()
+      .from(kbFolders)
+      .where(and(eq(kbFolders.id, id), eq(kbFolders.ownerId, userId)));
+    if (!row) throw new NotFoundException("folder not found");
+
+    const patch: Partial<typeof kbFolders.$inferInsert> = {};
+    if (input.name !== undefined) {
+      const name = input.name.trim();
+      if (!name) throw new Error("目录名不能为空");
+      patch.name = name;
+    }
+    if (input.parentId !== undefined) {
+      if (input.parentId === null) {
+        patch.parentId = null;
+      } else {
+        if (input.parentId === id) throw new Error("不能把目录移动到自身下");
+        const subtree = await this.folderSubtreeIds(userId, id);
+        if (subtree.has(input.parentId)) throw new Error("不能把目录移动到自己的子目录下");
+        const [parent] = await this.db
+          .select({ id: kbFolders.id })
+          .from(kbFolders)
+          .where(and(eq(kbFolders.id, input.parentId), eq(kbFolders.ownerId, userId)));
+        if (!parent) throw new NotFoundException("parent folder not found");
+        patch.parentId = input.parentId;
+      }
+    }
+    if (Object.keys(patch).length) {
+      await this.db.update(kbFolders).set(patch).where(eq(kbFolders.id, id));
+    }
+    const [fresh] = await this.db.select().from(kbFolders).where(eq(kbFolders.id, id));
+    const links = await this.db
+      .select({ documentId: kbLinks.documentId })
+      .from(kbLinks)
+      .where(and(eq(kbLinks.ownerId, userId), eq(kbLinks.folderId, id)));
+    return {
+      id: fresh.id,
+      parentId: fresh.parentId,
+      name: fresh.name,
+      sortOrder: fresh.sortOrder,
+      docCount: links.length,
+      createdAt: fresh.createdAt.getTime(),
+    };
+  }
+
+  /** 删除目录视图：删目录节点（子目录级联）+ 其下全部映射；文档本体与向量一律保留。 */
+  async deleteFolder(
+    userId: string,
+    id: string,
+  ): Promise<{ removedFolders: number; removedLinks: number }> {
+    const ids = [...(await this.folderSubtreeIds(userId, id))];
+    const linkRows = await this.db
+      .select({ id: kbLinks.id })
+      .from(kbLinks)
+      .where(and(eq(kbLinks.ownerId, userId), inArray(kbLinks.folderId, ids)));
+    await this.db
+      .delete(kbLinks)
+      .where(and(eq(kbLinks.ownerId, userId), inArray(kbLinks.folderId, ids)));
+    // 主归属目录被删的文档退化为「未归类」，主归属虚拟路径展示字段保留原值
+    await this.db
+      .update(kbDocuments)
+      .set({ primaryFolderId: null })
+      .where(and(eq(kbDocuments.ownerId, userId), inArray(kbDocuments.primaryFolderId, ids)));
+    await this.db
+      .delete(kbFolders)
+      .where(and(eq(kbFolders.ownerId, userId), inArray(kbFolders.id, ids)));
+    return { removedFolders: ids.length, removedLinks: linkRows.length };
+  }
+
+  /** 目录 + 全部子目录 id 集合（含自身）。parentId 无外键，靠内存遍历。 */
+  private async folderSubtreeIds(userId: string, folderId: string): Promise<Set<string>> {
+    const rows = await this.db
+      .select({ id: kbFolders.id, parentId: kbFolders.parentId })
+      .from(kbFolders)
+      .where(eq(kbFolders.ownerId, userId));
+    const childrenOf = new Map<string, string[]>();
+    for (const r of rows) {
+      if (r.parentId) {
+        const arr = childrenOf.get(r.parentId) ?? [];
+        arr.push(r.id);
+        childrenOf.set(r.parentId, arr);
+      }
+    }
+    const ids = new Set<string>([folderId]);
+    const queue = [folderId];
+    while (queue.length) {
+      const cur = queue.shift() as string;
+      for (const c of childrenOf.get(cur) ?? []) {
+        if (!ids.has(c)) {
+          ids.add(c);
+          queue.push(c);
+        }
+      }
+    }
+    return ids;
+  }
+
+  /** 目录链（根→自身）的名字序列；目录不存在时返回 null。移动操作的防环校验保证无死循环。 */
+  private async folderChain(userId: string, folderId: string): Promise<string[] | null> {
+    const rows = await this.db
+      .select({ id: kbFolders.id, name: kbFolders.name, parentId: kbFolders.parentId })
+      .from(kbFolders)
+      .where(eq(kbFolders.ownerId, userId));
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    const chain: string[] = [];
+    const visited = new Set<string>();
+    let cur = byId.get(folderId);
+    while (cur && !visited.has(cur.id)) {
+      visited.add(cur.id);
+      chain.unshift(cur.name);
+      cur = cur.parentId ? byId.get(cur.parentId) : undefined;
+    }
+    return chain.length ? chain : null;
+  }
+
+  // ==================== 软链接（挂载 / 移除） ====================
+
+  /** 挂载：一份文档可挂多个目录，唯一约束防重复；不复制本体、不重复切片。 */
+  async mountDocument(userId: string, input: KbLinkInput): Promise<KbLinkDto> {
+    const [doc] = await this.db
+      .select({ id: kbDocuments.id })
+      .from(kbDocuments)
+      .where(and(eq(kbDocuments.id, input.documentId), eq(kbDocuments.ownerId, userId)));
+    if (!doc) throw new NotFoundException("document not found");
+    const [folder] = await this.db
+      .select({ id: kbFolders.id })
+      .from(kbFolders)
+      .where(and(eq(kbFolders.id, input.folderId), eq(kbFolders.ownerId, userId)));
+    if (!folder) throw new NotFoundException("folder not found");
+    await this.db
+      .insert(kbLinks)
+      .values({
+        id: randomUUID(),
+        ownerId: userId,
+        documentId: input.documentId,
+        folderId: input.folderId,
+        createdAt: new Date(),
+      })
+      .onConflictDoNothing();
+    const [row] = await this.db
+      .select()
+      .from(kbLinks)
+      .where(and(eq(kbLinks.documentId, input.documentId), eq(kbLinks.folderId, input.folderId)));
+    return {
+      id: row.id,
+      documentId: row.documentId,
+      folderId: row.folderId,
+      createdAt: row.createdAt.getTime(),
+    };
+  }
+
+  /** 移除链接：仅删映射行。文档本体、向量切片、其他目录视图全部保留，全局检索仍可命中。 */
+  async unlink(userId: string, linkId: string): Promise<void> {
+    const res = await this.db
+      .delete(kbLinks)
+      .where(and(eq(kbLinks.id, linkId), eq(kbLinks.ownerId, userId)))
+      .returning({ id: kbLinks.id });
+    if (!res.length) throw new NotFoundException("link not found");
+  }
+
+  /** 目录范围 → doc_id 集合：子树内全部挂载的文档（只看映射表，与主归属无关）。 */
+  private async scopeDocIds(userId: string, folderId: string): Promise<string[]> {
+    const subtree = await this.folderSubtreeIds(userId, folderId);
+    const rows = await this.db
+      .select({ documentId: kbLinks.documentId })
+      .from(kbLinks)
+      .where(and(eq(kbLinks.ownerId, userId), inArray(kbLinks.folderId, [...subtree])));
+    return [...new Set(rows.map((r) => r.documentId))];
+  }
+
   /** 摄入（异步）：落库 pending 行 + 存档原文后立即返回，切分/向量化在后台执行。
    *  状态翻转：pending → embedded / error；超时由 lightrag.waitProcessed 上限兜底（默认 10 分钟）。 */
   async ingest(userId: string, input: KbIngestInput): Promise<KbDocumentDto> {
@@ -94,13 +347,23 @@ export class KbService {
       throw new Error(`文档过长（>${MAX_DOC_CHARS} 字符），请拆分后上传`);
     }
 
+    // 主归属目录（可选）：写入 chunk primary_path 做路径语义增强；额外挂载不覆盖它
+    let primaryFolderId: string | null = null;
+    let primaryPath = `~/kb/${title}`;
+    if (input.folderId) {
+      const chain = await this.folderChain(userId, input.folderId);
+      if (!chain) throw new Error("主归属目录不存在");
+      primaryFolderId = input.folderId;
+      primaryPath = `~/kb/${[...chain, title].join("/")}`;
+    }
+
     const id = randomUUID();
     const row: typeof kbDocuments.$inferSelect = {
       id,
       ownerId: userId,
       title,
-      path: `~/kb/${title}`,
-      primaryFolderId: null,
+      path: primaryPath,
+      primaryFolderId,
       mime: input.mime ?? "text/plain",
       size: Buffer.byteLength(content, "utf8"),
       status: "pending",
@@ -128,7 +391,7 @@ export class KbService {
     }
 
     // 后台处理：不阻塞接口响应；异常落入 error 状态，由前端轮询感知
-    void this.processDocument(id, userId, title, content).catch((e) => {
+    void this.processDocument(id, userId, title, content, primaryPath).catch((e) => {
       this.log.warn(`processDocument ${id} unexpected: ${(e as Error).message}`);
     });
     return this.toDto(row);
@@ -155,18 +418,20 @@ export class KbService {
       .update(kbDocuments)
       .set({ status: "pending", error: null })
       .where(eq(kbDocuments.id, id));
-    void this.processDocument(id, userId, doc.title, content).catch((e) => {
+    void this.processDocument(id, userId, doc.title, content, doc.path).catch((e) => {
       this.log.warn(`processDocument ${id} unexpected: ${(e as Error).message}`);
     });
     return this.toDto({ ...doc, status: "pending", error: null });
   }
 
-  /** 后台处理：切分 + embedding / LightRAG 图谱抽取，完成后翻转状态 */
+  /** 后台处理：切分 + embedding / LightRAG 图谱抽取，完成后翻转状态。
+   *  primaryPath 写入 Qdrant payload.primary_path（路径语义增强；LightRAG 链路不写）。 */
   private async processDocument(
     id: string,
     userId: string,
     title: string,
     content: string,
+    primaryPath = `~/kb/${title}`,
   ): Promise<void> {
     try {
       if (this.useLightRag()) {
@@ -186,7 +451,14 @@ export class KbService {
           chunks.map((text, ix) => ({
             id: randomUUID(),
             vector: vectors[ix],
-            payload: { doc_id: id, chunk_ix: ix, user_id: userId, doc_title: title, text },
+            payload: {
+              doc_id: id,
+              chunk_ix: ix,
+              user_id: userId,
+              doc_title: title,
+              text,
+              primary_path: primaryPath,
+            },
           })),
         );
         await this.db
@@ -204,20 +476,47 @@ export class KbService {
     }
   }
 
-  async search(userId: string, query: string, topK = 5): Promise<KbSearchResultDto> {
+  /** 双模式检索：
+   *  ① 全局（folderId 缺省）：全部扁平文档直接召回，与纯扁平方案行为一致；
+   *  ② 目录范围（folderId 传入）：映射表取子树 doc_id 集合 → 向量库 metadata 过滤召回。
+   *  LightRAG 链路不支持 metadata 过滤，只能全局召回后应用层过滤（scopeFiltered 标记）。 */
+  async search(
+    userId: string,
+    query: string,
+    topK = 5,
+    folderId?: string,
+  ): Promise<KbSearchResultDto> {
     const started = Date.now();
     const q = query.trim();
     if (!q) return { query, hits: [], embedding: "local", latencyMs: 0 };
 
+    const docIds = folderId ? await this.scopeDocIds(userId, folderId) : undefined;
+
     if (this.useLightRag()) {
       const limit = Math.min(Math.max(topK, 1), 20);
       const chunks = await this.lightrag.queryData(q, limit);
-      const hits = await this.chunksToHits(userId, chunks, limit);
-      return { query, hits, embedding: "model", latencyMs: Date.now() - started };
+      let hits = await this.chunksToHits(userId, chunks, limit);
+      const scopeFiltered = !!docIds;
+      if (docIds) {
+        const allow = new Set(docIds);
+        hits = hits.filter((h) => allow.has(h.docId));
+      }
+      return {
+        query,
+        hits,
+        embedding: "model",
+        latencyMs: Date.now() - started,
+        scopeFiltered,
+      };
     }
 
     const { vectors, source } = await this.embed.embed([q]);
-    const hits = await this.qdrant.search(vectors[0], userId, Math.min(Math.max(topK, 1), 20));
+    const hits = await this.qdrant.search(
+      vectors[0],
+      userId,
+      Math.min(Math.max(topK, 1), 20),
+      docIds,
+    );
     return {
       query,
       embedding: source,
@@ -228,6 +527,7 @@ export class KbService {
         chunkIx: h.payload.chunk_ix,
         score: Math.round(h.score * 1000) / 1000,
         text: h.payload.text,
+        primaryPath: h.payload.primary_path,
       })),
     };
   }
@@ -390,6 +690,10 @@ export class KbService {
     } else {
       await this.qdrant.deleteByDoc(id);
     }
+    // 删除文档本体：清除所有目录视图中的映射记录（文档在所有目录中消失）
+    await this.db
+      .delete(kbLinks)
+      .where(and(eq(kbLinks.ownerId, userId), eq(kbLinks.documentId, id)));
     await this.db.delete(kbDocuments).where(eq(kbDocuments.id, id));
     // MinIO 原文与遗留本地存档都清一遍（迁移期两种都可能存在）
     await this.storage
