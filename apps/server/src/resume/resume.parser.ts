@@ -29,18 +29,19 @@ const COMPANY_RE = /(?:公司|集团|科技|信息|网络|软件|数据|智能|�
 const ROLE_RE = /(?:工程师|架构师|经理|总监|主管|专家|设计师|分析师|顾问|负责人|组长|实习生|Leader|Engineer|Manager|Designer|Analyst|Director)/i;
 const SCHOOL_RE = /(?:大学|学院|学校|中学|University|College|Institute|School)/i;
 const DEGREE_RE = /(?:博士|硕士|研究生|本科|学士|大专|专科|MBA|PhD|Master|Bachelor)/i;
+const GPA_RE = /GPA\s*[:：]?\s*([\d.]+\s*(?:\s*\/\s*[\d.]+)?)/i;
 
 type Section = "intro" | "experience" | "projects" | "skills" | "summary" | "education";
 
 /** 章节标题：整行匹配，允许 # / ** / - 前缀与冒号结尾 */
 const SECTION_RULES: Array<[Section, RegExp]> = [
-  ["experience", /^(?:工作经历|工作经验|职业经历|工作履历|职业履历|实习经历|工作与项目经历|work\s*experience|experience|employment)$/i],
-  ["projects", /^(?:项目经历|项目经验|项目实践|projects?|project\s*experience)$/i],
-  ["skills", /^(?:专业技能|技能清单|技能特长|技术栈|技能|个人技能|skills?|technical\s*skills)$/i],
+  ["experience", /^(?:工作经历|工作经验|职业经历|工作履历|职业履历|实习经历|实习经验|工作与项目经历|校园经历|社会实践|work\s*experience|experience|employment)$/i],
+  ["projects", /^(?:项目经历|项目经验|项目实践|项目作品|作品集|主要项目|projects?|project\s*experience)$/i],
+  ["skills", /^(?:专业技能|技能清单|技能特长|技术栈|技术能力|专业能力|核心技能|能力标签|个人技能|skills?|technical\s*skills)$/i],
   // 荣誉/证书/语言类没有独立结构，按技能组解析，至少不让标题掉进上一章节当内容
-  ["skills", /^(?:荣誉奖项|获奖情况|获奖经历|荣誉证书|奖项荣誉|奖项|证书|语言能力|外语水平|语言|兴趣爱好|awards?|honors?|certificates?|languages?|interests?)$/i],
-  ["summary", /^(?:个人简介|自我介绍|自我评价|个人总结|个人优势|关于我|summary|about\s*me|profile)$/i],
-  ["education", /^(?:教育经历|教育背景|学历|education|educational\s*background)$/i],
+  ["skills", /^(?:荣誉奖项|获奖情况|获奖经历|荣誉证书|奖项荣誉|奖项|证书|技能证书|语言能力|外语水平|语言|兴趣爱好|awards?|honors?|certificates?|languages?|interests?)$/i],
+  ["summary", /^(?:个人简介|自我介绍|自我评价|个人评价|自我描述|个人总结|个人优势|个人亮点|关于我|summary|about\s*me|profile)$/i],
+  ["education", /^(?:教育经历|教育背景|学习经历|学历|education|educational\s*background)$/i],
 ];
 
 function stripMarkdown(line: string): string {
@@ -52,10 +53,29 @@ function stripMarkdown(line: string): string {
     .trim();
 }
 
+/** 章节标题归一化：去掉编号（「一、」「1.」「（2）」）、装饰符号与尾部括号说明。
+ *  PDF/Word 里的标题常写成「一、工作经历」「1. 项目经历（重点）」或中英双语「工作经历 / Work Experience」。 */
+function normalizeHeading(line: string): string {
+  return stripMarkdown(line)
+    .replace(
+      /^[\s　]*(?:[一二三四五六七八九十]+[、.．]|[（(]\s*[0-9一二三四五六七八九十]{1,2}\s*[）)]|[0-9]{1,2}\s*[、.．)）])\s*/,
+      "",
+    )
+    .replace(/^[-–—=*·▍◆■]+[\s　]*/, "")
+    .replace(/[（(][^）)]*[）)]\s*$/, "")
+    .replace(/[\s　]+/g, " ")
+    .trim();
+}
+
 function sectionOf(line: string): Section | null {
-  const t = stripMarkdown(line);
-  if (!t || t.length > 20) return null;
-  for (const [key, re] of SECTION_RULES) if (re.test(t)) return key;
+  const t = normalizeHeading(line);
+  if (!t || t.length > 32) return null;
+  // 中英双语标题按分隔符拆开逐个匹配
+  for (const variant of t.split(/\s*[/|｜]\s*/)) {
+    const v = variant.trim();
+    if (!v) continue;
+    for (const [key, re] of SECTION_RULES) if (re.test(v)) return key;
+  }
   return null;
 }
 
@@ -170,9 +190,12 @@ function buildEntries(lines: string[], acceptHeader: (line: string) => boolean):
     const hasPeriod = PERIOD_RE.test(line);
     const isBullet = BULLET_RE.test(raw) || /^\s{2,}/.test(raw);
     if (!out.length) {
-      if (hasPeriod || isHeader(line)) {
-        out.push({ header: line, period: extractPeriod(line), body: [] });
-      }
+      // 章节第一行不是标题也先开条目，避免首条内容被整段丢弃（解析「内容不完整」的主因）
+      out.push({
+        header: hasPeriod || isHeader(line) ? line : "",
+        period: extractPeriod(line),
+        body: hasPeriod || isHeader(line) ? [] : [line],
+      });
       continue;
     }
     const entry = out[out.length - 1];
@@ -213,6 +236,13 @@ function parseExperience(lines: string[]): ResumeExperience[] {
       if (!company && body.length > 0 && COMPANY_RE.test(body[0])) {
         company = body.shift() as string;
       }
+      // 完全没有头部信息（首行就是描述）时，用首个短行充当职位/公司，保住这条经历
+      if (!company && !role && body.length > 0) {
+        const first = body[0];
+        if (first.length <= 40) {
+          company = body.shift() as string;
+        }
+      }
 
       return {
         period: e.period,
@@ -221,7 +251,7 @@ function parseExperience(lines: string[]): ResumeExperience[] {
         highlights: body.map((h) => clip(h, 300)).filter(Boolean).slice(0, 12),
       };
     })
-    .filter((e) => e.company || e.role || e.period)
+    .filter((e) => e.company || e.role || e.period || e.highlights.length > 0)
     .slice(0, 20);
 }
 
@@ -236,15 +266,28 @@ function parseProjects(lines: string[]): ResumeProject[] {
     .map((e) => {
       const parts = splitFields(e.header, e.period);
       const name = clip(parts[0] ?? e.header, 80);
-      const inline = clip(parts.slice(1).join(" · "), 120);
-      const body = e.body.join("；");
+      const body = [...e.body];
+      // 项目里的「技术负责人 / 项目负责人」等价于工作经历的岗位，提到标题行
+      let role = parts.find((p) => p !== name && p.length <= 20 && ROLE_RE.test(p)) ?? "";
+      if (!role && body.length > 0 && body[0].length <= 20 && ROLE_RE.test(body[0])) {
+        role = body.shift() as string;
+      }
+      const inline = clip(parts.filter((p) => p !== name && p !== role).join(" · "), 120);
+      const bodyText = body.join("；");
       const url = (e.header.match(URL_RE) ?? e.body.join(" ").match(URL_RE))?.[0] ?? "";
-      let desc = [inline, body].filter(Boolean).join("；").replace(URL_RE, "").trim();
+      let desc = [inline, bodyText].filter(Boolean).join("；").replace(URL_RE, "").trim();
       // 去掉紧跟在描述后面的多余分隔符
       desc = desc.replace(/[·\-—|｜]\s*$/g, "").replace(/^\s*[·\-—|｜]\s*/g, "");
-      return { name, desc: clip(desc, 300), url: clip(url, 300), tags: [] };
+      return {
+        name,
+        role: clip(role, 60),
+        period: clip(e.period, 60),
+        desc: clip(desc, 300),
+        url: clip(url, 300),
+        tags: [],
+      };
     })
-    .filter((p) => p.name)
+    .filter((p) => p.name || p.role || p.desc)
     .slice(0, 20);
 }
 
@@ -286,21 +329,33 @@ function parseEducation(lines: string[]): ResumeEducation[] {
   return buildEntries(lines, (line) => SCHOOL_RE.test(line))
     .map((e) => {
       const parts = splitFields(e.header, e.period);
-      const school = parts.find((p) => SCHOOL_RE.test(p)) ?? parts[0] ?? "";
+      const body = [...e.body];
+      let school = parts.find((p) => SCHOOL_RE.test(p)) ?? parts[0] ?? "";
       const degree =
         parts.find((p) => DEGREE_RE.test(p)) ?? e.body.join(" ").match(DEGREE_RE)?.[0] ?? "";
+      // 头部为空（首行是学位/专业）时，把正文里的学校名或首个短行提上来
+      if (!school) {
+        const idx = body.findIndex((l) => SCHOOL_RE.test(l));
+        school = idx >= 0 ? body.splice(idx, 1)[0] : (body.shift() ?? "");
+      }
       const major = clip(
-        parts.filter((p) => p !== school && p !== degree).join(" · ") || e.body.join(" · "),
+        parts.filter((p) => p !== school && p !== degree).join(" · ") || body.join(" · "),
         80,
+      );
+      // GPA 常跟在教育行尾或被 PDF 拆成独立行，单独成字段而不是混进专业描述
+      const gpa = clip(
+        ([e.header, ...e.body].join(" ").match(GPA_RE)?.[1] ?? "").replace(/\s+/g, ""),
+        40,
       );
       return {
         period: e.period,
         school: clip(school, 80),
         major,
         degree: clip(degree, 40),
+        gpa,
       };
     })
-    .filter((e) => e.school)
+    .filter((e) => e.school || e.gpa || e.major || e.degree)
     .slice(0, 10);
 }
 

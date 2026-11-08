@@ -6,7 +6,7 @@ export type PipeSopStatus = (typeof PIPE_SOP_STATUSES)[number];
 export const PIPE_RUN_STATUSES = ["running", "done", "failed"] as const;
 export type PipeRunStatus = (typeof PIPE_RUN_STATUSES)[number];
 
-export const PIPE_STEP_STATUSES = ["done", "failed", "skipped"] as const;
+export const PIPE_STEP_STATUSES = ["pending", "running", "done", "failed", "skipped"] as const;
 export type PipeStepStatus = (typeof PIPE_STEP_STATUSES)[number];
 
 /** SOP 内的一步：名称 + 对该步的指令（缺省时用名称作为指令） */

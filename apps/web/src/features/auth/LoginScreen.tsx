@@ -12,6 +12,11 @@ export default function LoginScreen() {
   const [busy, setBusy] = useState(false);
 
   const submit = async () => {
+    // 与 MinIO root 密码规则一致：注册密码至少 8 位
+    if (mode === "register" && password.length < 8) {
+      setErr("密码至少 8 位（与对象存储 root 规则一致）");
+      return;
+    }
     setBusy(true);
     setErr(null);
     try {
@@ -42,8 +47,13 @@ export default function LoginScreen() {
 
   return (
     <div className="grid-bg flex h-full flex-col items-center justify-center gap-8 font-mono">
-      <div className="text-2xl font-bold tracking-wider">
-        <span className="text-acc">⌘</span> AI-WORKBENCH
+      <div className="flex items-center gap-3 text-2xl font-bold tracking-wider">
+        <img
+          src="/icons/icon-192.png"
+          alt=""
+          className="h-12 w-12 rounded-md border border-line"
+        />
+        AI-WORKBENCH
       </div>
 
       <div className="w-[340px] rounded-lg border border-line bg-bg1">

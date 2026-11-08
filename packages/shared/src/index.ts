@@ -5,6 +5,7 @@ export * from "./chat.js";
 export * from "./agents.js";
 export * from "./kb.js";
 export * from "./resume.js";
+export * from "./contact.js";
 export * from "./toolbox.js";
 export * from "./projects.js";
 export * from "./code.js";

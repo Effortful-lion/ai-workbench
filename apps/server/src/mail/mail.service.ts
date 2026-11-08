@@ -1,8 +1,10 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { and, asc, desc, eq, isNotNull } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
+import { mkdir, rm, writeFile } from "node:fs/promises";
+import { resolve, sep } from "node:path";
 import { ImapFlow } from "imapflow";
-import { simpleParser } from "mailparser";
+import { simpleParser, type Attachment } from "mailparser";
 import * as nodemailer from "nodemailer";
 import type {
   MailAccountDto,
@@ -33,18 +35,83 @@ const MAX_QUERY = 80;
 /** 每个账户单次最多拉取的最新邮件数 */
 const SYNC_LIMIT = 50;
 const NET_TIMEOUT_MS = 15_000;
+/** HTML 正文入库上限（超出截断，避免 SQLite 行过大） */
+const MAX_HTML = 300_000;
+/** 单个附件落盘上限，超出只存元信息 */
+const MAX_ATTACH_BYTES = 25 * 1024 * 1024;
+const ATTACH_ROOT = resolve(__dirname, "../../../..", "data", "mail-attachments");
+
+/** 附件落盘后的元信息（DTO 不下发 path，下载按 index 反查） */
+type StoredAttachment = {
+  index: number;
+  filename: string;
+  contentType: string;
+  size: number;
+  inline: boolean;
+  path: string | null;
+};
+
+function safeAttachmentName(raw: string, index: number): string {
+  const base = raw
+    .replace(/[\\/:*?"<>|\u0000-\u001f]+/g, "_")
+    .trim()
+    .slice(0, 120);
+  return base || `attachment-${index + 1}`;
+}
+
+/** 附件二进制写入 data/mail-attachments/<messageId>/，返回可入库的元信息 */
+async function persistMessageAttachments(
+  messageId: string,
+  attachments: Attachment[],
+): Promise<StoredAttachment[]> {
+  if (!attachments.length) return [];
+  const dir = resolve(ATTACH_ROOT, messageId);
+  const out: StoredAttachment[] = [];
+  for (let i = 0; i < attachments.length; i++) {
+    const a = attachments[i]!;
+    const inline = Boolean(a.cid) || Boolean(a.related);
+    const filename = (a.filename ?? "").trim() || `attachment-${i + 1}`;
+    const size = Number(a.size ?? a.content?.length ?? 0);
+    let path: string | null = null;
+    if (a.content && a.content.length <= MAX_ATTACH_BYTES) {
+      await mkdir(dir, { recursive: true });
+      const file = `${i}-${safeAttachmentName(filename, i)}`;
+      await writeFile(resolve(dir, file), a.content);
+      path = `${messageId}/${file}`;
+    }
+    out.push({
+      index: i,
+      filename,
+      contentType: a.contentType || "application/octet-stream",
+      size,
+      inline,
+      path,
+    });
+  }
+  return out;
+}
 
 const EMAIL_RE = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/;
 
 /** 关键词权重：标题 2 分、正文 1 分；分数最高者胜，平分时重要 > 垃圾 > 订阅 */
 const IMPORTANT_HINTS = [
-  "到期", "续费", "账单", "发票", "报价", "合同", "评审", "review", "security",
-  "安全", "告警", "异常", "紧急", "会议邀请", "付款", "逾期", "权限", "部署失败",
+  "到期", "续费", "账单", "发票", "报价", "合同", "评审", "review",
+  "告警", "异常", "紧急", "会议邀请", "付款", "逾期", "权限", "部署失败",
   "incident", "invoice", "payment", "deadline", "approval", "故障", "宕机", "证书",
+];
+/** 「重要」的强信号：命中任一即判重要（与 IMPORTANT_HINTS 的弱信号分开，避免订阅邮件正文出现 security 被误判） */
+const IMPORTANT_STRONG_HINTS = [
+  "cve-", "dependabot", "vulnerability", "vulnerabilities", "安全漏洞",
+  "high severity", "critical severity", "action required", "立即处理",
 ];
 const SUBSCRIPTION_HINTS = [
   "订阅", "周刊", "周报", "日报", "digest", "newsletter", "unsubscribe", "退订",
   "weekly", "产品更新", "更新日志", "热门", "推广", "促销",
+];
+/** 已知订阅源发件域：命中直接判订阅，不再走关键词打分（避免推广周报正文带 security/安全 被误判） */
+const SUBSCRIPTION_DOMAINS = [
+  "freecodecamp.org", "ngrok.com", "substack.com", "medium.com",
+  "mailchimpapp.com", "sendgrid.net", "mailgun.org", "campaign-archive.com",
 ];
 const SPAM_HINTS = [
   "中奖", "抽奖", "恭喜您", "免费领取", "点击领取", "限时", "先到先得", "钓鱼",
@@ -150,14 +217,31 @@ function describeMailError(e: unknown): string {
   return (hint ? `${hint} — 服务器返回：${raw}` : raw).slice(0, 300);
 }
 
-/** 规则式「AI」分类：可解释、可测试，真实 LLM 分类留到模型接入后替换 */
-function classifyContent(subject: string, body: string, fromName = ""): {
+/** 规则式「AI」分类：可解释、可测试，真实 LLM 分类留到模型接入后替换。
+ *  三层约束，按优先级从高到低：
+ *  1. 已知订阅域（freeCodeCamp/ngrok 等）→ 直接订阅，避免正文出现 security 被误判；
+ *  2. 强信号（CVE-XXXX / Dependabot / action required）→ 直接重要；
+ *  3. 关键词打分：unsubscribe / 批量邮件特征会扣 important 分，避免推广周报误判。 */
+function classifyContent(subject: string, body: string, fromName = "", fromAddress = ""): {
   category: MailCategory;
   reason: string;
 } {
   const head = subject.toLowerCase();
   const full = `${subject}\n${body}\n${fromName}`.toLowerCase();
+  const addr = fromAddress.toLowerCase();
 
+  // 1. 已知订阅域短路：推广/周刊类邮件即使正文带 security 也判订阅
+  if (addr && SUBSCRIPTION_DOMAINS.some((d) => addr.endsWith(`@${d}`) || addr.includes(`.${d}`))) {
+    return { category: "subscription", reason: `来自订阅源 ${addr.split("@")[1] ?? addr}，可归档` };
+  }
+
+  // 2. 强信号短路：CVE / Dependabot / 明确行动号召 → 直接重要
+  const strong = IMPORTANT_STRONG_HINTS.find((k) => full.includes(k));
+  if (strong) {
+    return { category: "important", reason: `命中强信号「${strong}」，建议今天处理` };
+  }
+
+  // 3. 关键词打分：unsubscribe / List-Unsubscribe 头（批量邮件特征）会削弱 important 得分
   const score = (hints: string[]) => {
     let n = 0;
     for (const k of hints) {
@@ -168,9 +252,14 @@ function classifyContent(subject: string, body: string, fromName = ""): {
   };
   const hit = (hints: string[]) => hints.filter((k) => full.includes(k));
 
-  const important = score(IMPORTANT_HINTS);
+  const hasUnsubscribe = full.includes("unsubscribe") || full.includes("退订");
+  let important = score(IMPORTANT_HINTS);
   const subscription = score(SUBSCRIPTION_HINTS);
   const spam = score(SPAM_HINTS);
+
+  // 批量邮件特征（unsubscribe）且没有强信号时，important 得分减半：
+  // 避免 freeCodeCamp/ngrok 这类周报正文提到 security 就被判重要
+  if (hasUnsubscribe && important > 0) important = Math.floor(important / 2);
 
   const pick = (hints: string[]) => hit(hints).slice(0, 2).join(" / ");
 
@@ -223,6 +312,7 @@ export class MailService {
   constructor(@Inject(DB) private readonly db: Db) {}
 
   private toDto(row: typeof mailMessages.$inferSelect, accountName: string): MailMessageDto {
+    const atts = (row.attachmentsJson ?? []) as StoredAttachment[];
     return {
       id: row.id,
       accountId: row.accountId,
@@ -234,6 +324,16 @@ export class MailService {
       toAddress: row.toAddress,
       subject: row.subject,
       body: row.body,
+      // 空串是「已解析但无 HTML」的标记，对外统一为 null
+      bodyHtml: row.bodyHtml || null,
+      attachments: atts.map((a) => ({
+        index: a.index,
+        filename: a.filename,
+        contentType: a.contentType,
+        size: a.size,
+        inline: a.inline,
+        available: Boolean(a.path),
+      })),
       snippet: snippetOf(row.body),
       receivedAt: row.receivedAt.getTime(),
       isRead: row.isRead,
@@ -581,6 +681,27 @@ export class MailService {
     return this.toDto(row.message, row.accountName);
   }
 
+  /** 附件下载所需的绝对路径与元信息；越界路径一律按不存在处理 */
+  async attachmentFile(
+    userId: string,
+    messageId: string,
+    index: number,
+  ): Promise<{ path: string; filename: string; contentType: string; size: number }> {
+    const row = await this.ownedMessage(userId, messageId);
+    const meta = ((row.message.attachmentsJson ?? []) as StoredAttachment[]).find(
+      (a) => a.index === index,
+    );
+    if (!meta?.path) throw new NotFoundException("附件不存在或内容未保存");
+    const abs = resolve(ATTACH_ROOT, meta.path);
+    if (!abs.startsWith(ATTACH_ROOT + sep)) throw new NotFoundException("附件不存在");
+    return {
+      path: abs,
+      filename: meta.filename,
+      contentType: meta.contentType,
+      size: meta.size,
+    };
+  }
+
   async updateMessage(
     userId: string,
     id: string,
@@ -641,6 +762,8 @@ export class MailService {
       await this.pushDelete(account, uid, row.message.folder);
     }
     await this.db.delete(mailMessages).where(eq(mailMessages.id, id));
+    // 同步清理落盘附件，避免残留
+    await rm(resolve(ATTACH_ROOT, id), { recursive: true, force: true }).catch(() => undefined);
   }
 
   private cfgOf(row: typeof mailAccounts.$inferSelect): AccountConfig {
@@ -799,6 +922,8 @@ export class MailService {
       toAddress: to,
       subject,
       body,
+      bodyHtml: null,
+      attachmentsJson: [],
       externalId: null,
       receivedAt: now,
       isRead: true,
@@ -838,6 +963,8 @@ export class MailService {
       toAddress: to,
       subject,
       body: content,
+      bodyHtml: null,
+      attachmentsJson: [],
       externalId: null,
       receivedAt: now,
       isRead: true,
@@ -873,7 +1000,7 @@ export class MailService {
       normal: 0,
     };
     for (const row of rows) {
-      const result = classifyContent(row.subject, row.body, row.fromName);
+      const result = classifyContent(row.subject, row.body, row.fromName, row.fromAddress);
       counts[result.category] += 1;
       await this.db
         .update(mailMessages)
@@ -925,7 +1052,12 @@ export class MailService {
         const exists = this.inboxCount(client);
 
         const existing = await this.db
-          .select({ id: mailMessages.id, externalId: mailMessages.externalId, isRead: mailMessages.isRead })
+          .select({
+            id: mailMessages.id,
+            externalId: mailMessages.externalId,
+            isRead: mailMessages.isRead,
+            bodyHtml: mailMessages.bodyHtml,
+          })
           .from(mailMessages)
           .where(
             and(
@@ -938,7 +1070,10 @@ export class MailService {
         const local = new Map(
           existing
             .filter((r) => r.externalId)
-            .map((r) => [r.externalId as string, { id: r.id, isRead: r.isRead }]),
+            .map((r) => [
+              r.externalId as string,
+              { id: r.id, isRead: r.isRead, bodyHtml: r.bodyHtml },
+            ]),
         );
 
         if (exists > 0) {
@@ -959,6 +1094,23 @@ export class MailService {
             const externalId = `imap:${account.id}:${uid}`;
             const known = local.get(externalId);
             if (known) {
+              // 老数据缺 HTML/附件（bodyHtml 为 null）：用本次已拉取的 raw 补全，只做一次
+              if (known.bodyHtml === null) {
+                const parsed = await simpleParser(raw);
+                const html = typeof parsed.html === "string" ? parsed.html : "";
+                await this.db
+                  .update(mailMessages)
+                  .set({
+                    bodyHtml: html ? html.slice(0, MAX_HTML) : "",
+                    attachmentsJson: await persistMessageAttachments(
+                      known.id,
+                      parsed.attachments ?? [],
+                    ),
+                    updatedAt: now,
+                  })
+                  .where(eq(mailMessages.id, known.id));
+                known.bodyHtml = html ? "<html>" : "";
+              }
               // 已同步过的邮件：把远端已读状态拉回来，保持双向一致
               const isRead = Boolean(msg.flags?.has("\\Seen"));
               if (known.isRead !== isRead) {
@@ -980,10 +1132,11 @@ export class MailService {
             const body = bodyText(parsed.text ?? (html ? stripHtml(html) : "")) || "（无正文）";
             const receivedAt = new Date(parsed.date ?? msg.envelope?.date ?? now);
             const isRead = Boolean(msg.flags?.has("\\Seen"));
-            const { category, reason } = classifyContent(subject, body, fromName);
+            const { category, reason } = classifyContent(subject, body, fromName, fromAddress);
 
+            const messageId = randomUUID();
             await this.db.insert(mailMessages).values({
-              id: randomUUID(),
+              id: messageId,
               ownerId: userId,
               accountId: account.id,
               folder: "inbox",
@@ -993,6 +1146,8 @@ export class MailService {
               toAddress: account.address,
               subject,
               body,
+              bodyHtml: html ? html.slice(0, MAX_HTML) : "",
+              attachmentsJson: await persistMessageAttachments(messageId, parsed.attachments ?? []),
               externalId,
               receivedAt,
               isRead,

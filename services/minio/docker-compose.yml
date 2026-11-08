@@ -1,0 +1,20 @@
+services:
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    ports:
+      - "9700:9000"   # S3 API
+      - "9701:9001"   # Web 控制台
+    environment:
+      # 管理员凭据（ADMIN_USER / ADMIN_PASS）属于网站级配置，
+      # 由仓库根目录 .env 通过 --env-file 注入（见 up.sh），不在本服务内定义。
+      MINIO_ROOT_USER: ${ADMIN_USER}
+      MINIO_ROOT_PASSWORD: ${ADMIN_PASS}
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5

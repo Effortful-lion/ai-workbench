@@ -22,7 +22,7 @@ const STATUS_DOT: Record<ModelDto["status"], string> = {
 export default function ChatColumn() {
   const {
     conversations, currentId, messages, streaming, streamBuf, error, pendingAgentId, pendingModelId,
-    send, openConversation, removeConversation, newChat, startAgentChat, setModel,
+    send, stop, openConversation, removeConversation, newChat, startAgentChat, setModel,
   } = useChatStore();
   const { agents, load: loadAgents } = useAgentsStore();
   const [models, setModels] = useState<ModelDto[]>([]);
@@ -98,12 +98,15 @@ export default function ChatColumn() {
             style={{ maxWidth: 220 }}
             value={pendingModelId ?? ""}
             onChange={(e) => setModel(e.target.value || null)}
-            title="选择对话模型（默认 mock，切换后下一条消息生效）"
+            title="选择对话模型（不选则用默认模型，切换后下一条消息生效）"
           >
-            <option value="">◎ 自动（默认 mock）</option>
+            <option value="">
+              ◎ 自动（{models.find((m) => m.isDefault)?.modelName ?? "服务端挑选"}）
+            </option>
             {models.map((m) => (
               <option key={m.id} value={m.id}>
                 {m.provider}/{m.modelName}
+                {m.isDefault ? " ★" : ""}
               </option>
             ))}
           </select>
@@ -250,7 +253,18 @@ export default function ChatColumn() {
             onChange={(e) => setText(e.target.value)}
             disabled={streaming}
           />
-          <span className="font-mono text-[10px] text-tx3">⏎</span>
+          {streaming ? (
+            <button
+              type="button"
+              onClick={stop}
+              className="flex h-6 flex-none items-center gap-1 rounded border border-err/60 bg-err/10 px-2 font-mono text-[10px] text-err transition-colors hover:bg-err/20"
+              title="停止生成（保留已输出内容）"
+            >
+              ■ 停止
+            </button>
+          ) : (
+            <span className="font-mono text-[10px] text-tx3">⏎</span>
+          )}
           <CommandSuggest text={text} onPick={handleCmd} onClose={() => setText("")} />
         </div>
       </form>

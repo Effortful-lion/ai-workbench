@@ -79,6 +79,8 @@ function normalizeProfile(raw: unknown, fallbackName: string): ResumeProfile {
       const pr = (it ?? {}) as Partial<ResumeProject>;
       return {
         name: text(pr.name, 80),
+        role: text(pr.role, 60),
+        period: text(pr.period, 60),
         desc: text(pr.desc, 300),
         url: text(pr.url, 300),
         tags: items(pr.tags, 10)
@@ -86,19 +88,21 @@ function normalizeProfile(raw: unknown, fallbackName: string): ResumeProfile {
           .filter(Boolean),
       };
     })
-    .filter((pr) => pr.name);
+    .filter((pr) => pr.name || pr.role || pr.desc);
 
   const education: ResumeEducation[] = items(p.education, 10)
     .map((it) => {
-      const ed = (it ?? {}) as Partial<ResumeEducation>;
+      const ed = (it ?? {}) as Partial<ResumeEducation> & { GPA?: unknown; score?: unknown };
       return {
         period: text(ed.period, 60),
         school: text(ed.school, 80),
         major: text(ed.major, 80),
         degree: text(ed.degree, 40),
+        // 兼容手写 JSON 时常见的 GPA / score 两种写法
+        gpa: text(ed.gpa ?? ed.GPA ?? ed.score, 40),
       };
     })
-    .filter((ed) => ed.school);
+    .filter((ed) => ed.school || ed.gpa || ed.major || ed.degree);
 
   return { basics, experience, education, skills, projects };
 }

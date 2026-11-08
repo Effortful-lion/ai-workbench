@@ -34,6 +34,12 @@ export class ModelsController {
     return this.svc.remove(id);
   }
 
+  @Post(":id/default")
+  @RequirePerm("models:write")
+  setDefault(@Param("id") id: string) {
+    return this.svc.setDefault(id);
+  }
+
   @Post(":id/test")
   @RequirePerm("models:read")
   test(@Param("id") id: string, @Body() body: { prompt?: string }) {

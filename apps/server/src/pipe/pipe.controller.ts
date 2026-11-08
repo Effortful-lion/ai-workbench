@@ -85,4 +85,16 @@ export class PipeController {
   retryRun(@Param("id") id: string, @CurrentUser() user: AuthUser) {
     return this.svc.retryRun(user.id, id);
   }
+
+  /** 断点重试：从指定步骤（0-based index）重跑，前序步骤复用上次产出 */
+  @Post("runs/:id/retry-from")
+  @UseGuards(JwtAuthGuard, PermissionGuard)
+  @RequirePerm("pipe:write")
+  retryRunFromStep(
+    @Param("id") id: string,
+    @CurrentUser() user: AuthUser,
+    @Body() body: { fromStep?: number },
+  ) {
+    return this.svc.retryRunFromStep(user.id, id, Number(body?.fromStep ?? 0));
+  }
 }

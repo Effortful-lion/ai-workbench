@@ -16,6 +16,8 @@ export type ActionKey =
 const PANEL_NAMES: Record<PanelId, string> = {
   models: "模型管理",
   agents: "AI 助手",
+  history: "执行历史",
+  stats: "访问统计",
   kb: "AI 知识库",
   projects: "项目管理",
   code: "代码管理",
@@ -28,6 +30,7 @@ const PANEL_NAMES: Record<PanelId, string> = {
   resume: "个人简历",
   tools: "百宝箱",
   aitools: "工具管理",
+  gh: "GitHub 观察窗",
 };
 
 /** 全部斜杠命令。cmd 就是用户输入的完整形式（不带 /） */

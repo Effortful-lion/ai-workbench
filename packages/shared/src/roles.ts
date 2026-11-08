@@ -11,6 +11,8 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   member: [
     "me:read", "tools:read", "tools:write", "tools:custom",
     "kb:read", "kb:write",
+    "storage:read", "storage:write",
+    "github:read",
     "projects:read",
     "code:read",
     "schedule:read",

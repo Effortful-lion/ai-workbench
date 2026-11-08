@@ -166,12 +166,11 @@ export class LlmAdapter {
       // 上一条如果是 assistant 带了 tool_calls，说明这一轮已经是 mock 调完工具等结果了
       // 现在只判断：用户消息里有没有提到某个工具名
       const toolNames = tools.map((t) => t.function.name);
-      const hit = toolNames.find((n) => lastContent.toLowerCase().includes(n.toLowerCase().split(".")[0].toLowerCase()));
+      // 名字可能是 mail.accounts.list（原名）或 mail_accounts_list（合法 api 名），两种前缀都认
+      const moduleOf = (n: string) => n.toLowerCase().split(/[._]/)[0];
+      const hit = toolNames.find((n) => lastContent.toLowerCase().includes(moduleOf(n)));
       // 更宽松的匹配：按模块名
-      const hit2 = !hit && toolNames.find((n) => {
-        const short = n.split(".")[0].toLowerCase();
-        return lastContent.toLowerCase().includes(short);
-      });
+      const hit2 = !hit && toolNames.find((n) => lastContent.toLowerCase().includes(moduleOf(n)));
       const picked = hit ?? hit2;
       if (picked) {
         return {
@@ -190,7 +189,7 @@ export class LlmAdapter {
       }
       // 没命中 → 正常对话（提一下有哪些工具可用）
       return {
-        content: `⚠ mock 模型（原生 function calling 模式）\n可用工具：${toolNames.join(", ")}\n在消息里提及工具名（如 "${toolNames[0]?.split(".")[0] ?? "mail"}"）即可触发演示。`,
+        content: `⚠ mock 模型（原生 function calling 模式）\n可用工具：${toolNames.join(", ")}\n在消息里提及工具名（如 "${moduleOf(toolNames[0] ?? "mail")}"）即可触发演示。`,
         latencyMs: 5,
         finishReason: "stop",
         usage: { prompt_tokens: 1, completion_tokens: 30 },
@@ -247,6 +246,8 @@ export class LlmAdapter {
     topK?: number | null;
     timeoutMs?: number;
     usageRef?: StreamUsageRef;
+    /** 外部取消信号（用户点「停止」） */
+    signal?: AbortSignal;
   }): AsyncGenerator<StreamChunk, void, unknown> {
     const { endpoint, apiKey, model, messages, tools, timeoutMs = 60_000, usageRef } = opts;
 
@@ -263,6 +264,7 @@ export class LlmAdapter {
       } else {
         // 文本回复：逐字符 yield content，最后 yield done
         for (const ch of result.content ?? "") {
+          if (opts.signal?.aborted) throw new DOMException("aborted", "AbortError");
           yield { type: "content", delta: ch };
           await new Promise((r) => setTimeout(r, 6));
         }
@@ -282,6 +284,10 @@ export class LlmAdapter {
     if (tools?.length) body.tools = tools;
     this.applySampling(body, opts.temperature, opts.topK);
 
+    // 超时与用户取消合并：任一触发都断开 SSE
+    const timeoutSignal = AbortSignal.timeout(timeoutMs);
+    const signal = opts.signal ? AbortSignal.any([opts.signal, timeoutSignal]) : timeoutSignal;
+
     const res = await fetch(url, {
       method: "POST",
       headers: {
@@ -289,7 +295,7 @@ export class LlmAdapter {
         ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}),
       },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(timeoutMs),
+      signal,
     });
     if (!res.ok) {
       const text = await res.text().catch(() => "");

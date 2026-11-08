@@ -15,6 +15,8 @@ import { api } from "../lib/api";
 import { useAuthStore } from "./auth";
 
 const ECHO_ID = "local-echo";
+/** 用户停止时本地保留的已生成片段 id，done 到达后由服务端权威消息替换 */
+const STOP_ID = "local-stopped";
 
 interface ChatState {
   connected: boolean;
@@ -46,6 +48,8 @@ interface ChatState {
   /** 选择模型（不自动开新会话，仅影响下一条 send） */
   setModel: (modelId: string | null) => void;
   send: (content: string) => void;
+  /** 立刻停止当前生成（中断服务端 SSE，保留已输出的片段） */
+  stop: () => void;
   clearTrace: () => void;
 }
 
@@ -91,6 +95,8 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     });
     socket.on("delta", (p: { conversationId: string; delta: string }) => {
       if (p.conversationId !== get().currentId) return;
+      // 已点停止后忽略在途增量，避免气泡继续增长
+      if (!get().streaming) return;
       set((s) => ({ streamBuf: s.streamBuf + p.delta }));
     });
     socket.on("assistant", (p: ChatAssistantPayload) => {
@@ -107,7 +113,11 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       set((s) => ({ traceEvents: [...s.traceEvents, ev] }));
     });
     socket.on("done", (p: ChatDonePayload) => {
-      set((s) => ({ messages: [...s.messages, p.message], streaming: false, streamBuf: "" }));
+      set((s) => ({
+        messages: [...s.messages.filter((m) => m.id !== STOP_ID), p.message],
+        streaming: false,
+        streamBuf: "",
+      }));
       void get().loadConversations();
     });
     socket.on("error", (p: ChatErrorPayload) => {
@@ -184,6 +194,28 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       ...(pendingModelId ? { modelId: pendingModelId } : {}),
       ...(currentId ? {} : pendingAgentId ? { agentId: pendingAgentId } : {}),
     });
+  },
+
+  stop: () => {
+    if (!get().streaming) return;
+    const partial = get().streamBuf.trim();
+    socket?.emit("stop");
+    set((s) => ({
+      streaming: false,
+      streamBuf: "",
+      messages: partial
+        ? [
+            ...s.messages,
+            {
+              id: STOP_ID,
+              conversationId: s.currentId ?? "",
+              role: "assistant" as const,
+              content: partial,
+              createdAt: Date.now(),
+            },
+          ]
+        : s.messages,
+    }));
   },
 
   clearTrace: () => set({ traceEvents: [] }),

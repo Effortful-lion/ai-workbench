@@ -54,6 +54,19 @@ export class AuthService implements OnModuleInit {
           .where(eq(users.id, adminUser.id));
         this.log.log(`▸ admin 用户「${DEFAULT_ADMIN_USER}」角色已升级为 owner`);
       }
+      // 种子管理员（seeded）的密码以 ADMIN_PASS 环境变量为单一来源，每次启动同步
+      // —— 这样与 MinIO root 共用同一套凭据，改一处即全局生效
+      const profile = (adminUser.profileJson ?? {}) as { seeded?: boolean };
+      if (profile.seeded) {
+        const expectedHash = hashPassword(DEFAULT_ADMIN_PASS);
+        if (expectedHash !== adminUser.passwordHash) {
+          await this.db
+            .update(users)
+            .set({ passwordHash: expectedHash })
+            .where(eq(users.id, adminUser.id));
+          this.log.log(`▸ 种子管理员密码已同步为 ADMIN_PASS`);
+        }
+      }
       return;
     }
 

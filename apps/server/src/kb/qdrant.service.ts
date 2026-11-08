@@ -1,6 +1,8 @@
 import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
 
 const QDRANT_URL = process.env.QDRANT_URL ?? "http://localhost:6333";
+/** Qdrant 不可达时给出的可操作提示（写入文档 error 字段，前端直接展示） */
+const QDRANT_HINT = `向量库 Qdrant 不可达（${QDRANT_URL}）：请先启动 Qdrant 容器，或用 KB_PROVIDER=lightrag 切换图谱检索`;
 
 export interface ChunkPayload {
   doc_id: string;
@@ -38,22 +40,39 @@ export class QdrantService implements OnModuleInit {
     return this.ready;
   }
 
+  /** 统一出口：把网络层错误（fetch failed / 超时）翻译成可读提示 */
+  private async req(path: string, init: RequestInit = {}, timeoutMs = 10_000): Promise<Response> {
+    try {
+      return await fetch(`${QDRANT_URL}${path}`, {
+        ...init,
+        signal: init.signal ?? AbortSignal.timeout(timeoutMs),
+      });
+    } catch (e) {
+      const name = e instanceof Error ? e.name : "";
+      if (name === "TimeoutError" || name === "AbortError") {
+        throw new Error(`${QDRANT_HINT}（请求超时）`);
+      }
+      throw new Error(QDRANT_HINT);
+    }
+  }
+
   private collection(dim: number) {
     return `kb_chunks_d${dim}`;
   }
 
   private async ensureCollection(dim: number) {
     const name = this.collection(dim);
-    const res = await fetch(`${QDRANT_URL}/collections/${name}`, {
-      signal: AbortSignal.timeout(3000),
-    });
+    const res = await this.req(`/collections/${name}`, {}, 3000);
     if (res.ok) return;
-    const create = await fetch(`${QDRANT_URL}/collections/${name}`, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ vectors: { size: dim, distance: "Cosine" } }),
-      signal: AbortSignal.timeout(5000),
-    });
+    const create = await this.req(
+      `/collections/${name}`,
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ vectors: { size: dim, distance: "Cosine" } }),
+      },
+      5000,
+    );
     if (!create.ok) throw new Error(`create collection failed: ${await create.text()}`);
     this.log.log(`created collection ${name} (dim=${dim})`);
   }
@@ -62,14 +81,14 @@ export class QdrantService implements OnModuleInit {
     if (!points.length) return;
     const dim = points[0].vector.length;
     await this.ensureCollection(dim);
-    const res = await fetch(
-      `${QDRANT_URL}/collections/${this.collection(dim)}/points?wait=true`,
+    const res = await this.req(
+      `/collections/${this.collection(dim)}/points?wait=true`,
       {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ points }),
-        signal: AbortSignal.timeout(15_000),
       },
+      15_000,
     );
     if (!res.ok) throw new Error(`upsert failed: ${await res.text()}`);
   }
@@ -77,21 +96,22 @@ export class QdrantService implements OnModuleInit {
   async search(vector: number[], userId: string, topK: number): Promise<SearchHit[]> {
     if (!this.ready) return [];
     const name = this.collection(vector.length);
-    const exists = await fetch(`${QDRANT_URL}/collections/${name}`, {
-      signal: AbortSignal.timeout(3000),
-    });
+    const exists = await this.req(`/collections/${name}`, {}, 3000);
     if (!exists.ok) return [];
-    const res = await fetch(`${QDRANT_URL}/collections/${name}/points/search`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        vector,
-        limit: topK,
-        with_payload: true,
-        filter: { must: [{ key: "user_id", match: { value: userId } }] },
-      }),
-      signal: AbortSignal.timeout(10_000),
-    });
+    const res = await this.req(
+      `/collections/${name}/points/search`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          vector,
+          limit: topK,
+          with_payload: true,
+          filter: { must: [{ key: "user_id", match: { value: userId } }] },
+        }),
+      },
+      10_000,
+    );
     if (!res.ok) throw new Error(`search failed: ${await res.text()}`);
     const data = (await res.json()) as {
       result?: { score: number; payload: ChunkPayload }[];
@@ -102,23 +122,24 @@ export class QdrantService implements OnModuleInit {
   /** 文档可能进过任一维度集合（本地/模型），按前缀全量清理 */
   async deleteByDoc(docId: string) {
     if (!this.ready) return;
-    const res = await fetch(`${QDRANT_URL}/collections`, {
-      signal: AbortSignal.timeout(3000),
-    });
+    const res = await this.req("/collections", {}, 3000);
     if (!res.ok) return;
     const data = (await res.json()) as { result?: { collections?: { name: string }[] } };
     const names = (data.result?.collections ?? [])
       .map((c) => c.name)
       .filter((n) => n.startsWith("kb_chunks_d"));
     for (const name of names) {
-      const del = await fetch(`${QDRANT_URL}/collections/${name}/points/delete?wait=true`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          filter: { must: [{ key: "doc_id", match: { value: docId } }] },
-        }),
-        signal: AbortSignal.timeout(10_000),
-      });
+      const del = await this.req(
+        `/collections/${name}/points/delete?wait=true`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            filter: { must: [{ key: "doc_id", match: { value: docId } }] },
+          }),
+        },
+        10_000,
+      );
       if (!del.ok) this.log.warn(`delete points of doc ${docId} in ${name} failed: ${del.status}`);
     }
   }

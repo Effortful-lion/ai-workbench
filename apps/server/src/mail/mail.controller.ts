@@ -1,4 +1,18 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Res,
+  StreamableFile,
+  UseGuards,
+} from "@nestjs/common";
+import { createReadStream } from "node:fs";
+import type { ServerResponse } from "node:http";
 import type { MailAccountInput, MailMessageInput, MailMessagePatchInput } from "@aiwb/shared";
 import { JwtAuthGuard, CurrentUser, type AuthUser } from "../auth/jwt-auth.guard";
 import { PermissionGuard, RequirePerm } from "../common/permission.guard";
@@ -88,6 +102,27 @@ export class MailController {
   @RequirePerm("mail:read")
   getMessage(@Param("id") id: string, @CurrentUser() user: AuthUser) {
     return this.svc.getMessage(user.id, id);
+  }
+
+  /** 附件按 index 下载；二进制不随列表下发 */
+  @Get("messages/:id/attachments/:index")
+  @UseGuards(JwtAuthGuard, PermissionGuard)
+  @RequirePerm("mail:read")
+  async downloadAttachment(
+    @Param("id") id: string,
+    @Param("index") index: string,
+    @CurrentUser() user: AuthUser,
+    @Res({ passthrough: true }) res: ServerResponse,
+  ): Promise<StreamableFile> {
+    const file = await this.svc.attachmentFile(user.id, id, Number(index));
+    const fallback = file.filename.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_");
+    res.setHeader("content-type", file.contentType);
+    res.setHeader("content-length", String(file.size));
+    res.setHeader(
+      "content-disposition",
+      `attachment; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(file.filename)}`,
+    );
+    return new StreamableFile(createReadStream(file.path));
   }
 
   @Post("messages")

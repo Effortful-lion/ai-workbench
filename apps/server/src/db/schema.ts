@@ -276,6 +276,21 @@ export const mailMessages = sqliteTable("mail_messages", {
   toAddress: text("to_address").notNull().default(""),
   subject: text("subject").notNull().default(""),
   body: text("body").notNull().default(""),
+  /** 原始 HTML 正文（IMAP 解析所得，纯文本邮件为 null） */
+  bodyHtml: text("body_html"),
+  /** 附件元信息：{ index, filename, contentType, size, inline, path }，内容落盘 */
+  attachmentsJson: text("attachments_json", { mode: "json" })
+    .$type<
+      {
+        index: number;
+        filename: string;
+        contentType: string;
+        size: number;
+        inline: boolean;
+        path: string | null;
+      }[]
+    >()
+    .default([]),
   /** 稳定外部标识，演示同步与真实 message id 复用 */
   externalId: text("external_id"),
   receivedAt: integer("received_at", { mode: "timestamp" })
@@ -481,7 +496,7 @@ export const pipeRunSteps = sqliteTable("pipe_run_steps", {
     .references(() => pipeRuns.id, { onDelete: "cascade" }),
   stepIndex: integer("step_index").notNull().default(0),
   name: text("name").notNull().default(""),
-  status: text("status", { enum: ["done", "failed", "skipped"] }).notNull().default("done"),
+  status: text("status", { enum: ["pending", "running", "done", "failed", "skipped"] }).notNull().default("done"),
   input: text("input").notNull().default(""),
   output: text("output").notNull().default(""),
   error: text("error"),
@@ -497,6 +512,8 @@ export const models = sqliteTable("models", {
   kind: text("kind", { enum: ["chat", "embedding"] }).notNull().default("chat"),
   apiKeyEnc: text("api_key_enc"),
   status: text("status", { enum: ["ok", "error", "untested"] }).notNull().default("untested"),
+  /** 默认模型：聊天未指定 modelId 时优先选用（全局唯一，由 setDefault 保证） */
+  isDefault: integer("is_default", { mode: "boolean" }).notNull().default(false),
   /** 输入价格（元 / 1k tokens），0 = 未知/不计费 */
   priceIn: integer("price_in").notNull().default(0),
   /** 输出价格（元 / 1k tokens），0 = 未知/不计费 */
@@ -552,4 +569,42 @@ export const customTools = sqliteTable("custom_tools", {
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
     .$defaultFn(() => new Date()),
+});
+
+/** GitHub 账号（每人一条）。PAT 用 AES-GCM 加密存储，与 mail_accounts.password_enc 同一套。
+ *  只读：PAT 只勾 Contents/Metadata/PR/Issues/Actions/Notifications 的 Read 权限。 */
+export const githubAccounts = sqliteTable("github_accounts", {
+  id: text("id").primaryKey(),
+  ownerId: text("owner_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  /** GitHub 用户名，首次 profile 拉取后回填 */
+  username: text("username").notNull().default(""),
+  /** fine-grained PAT（AES-GCM 加密），展示时只回 ghp_••••xxxx */
+  tokenEnc: text("token_enc"),
+  /** 连接状态：ok / error / untested */
+  status: text("status", { enum: ["ok", "error", "untested"] }).notNull().default("untested"),
+  lastError: text("last_error"),
+  updatedAt: integer("updated_at", { mode: "timestamp" }),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+/** GitHub 只读快照。所有面板/AI 取数都先落这里，UI 只读快照。
+ *  kind: profile | repos | repo | readme | commits | languages | contributions | inbox | notifications | runs | search_repos
+ *  key: 如 Effortful-lion/ai-workbench，聚合类为空串 */
+export const githubSnapshots = sqliteTable("github_snapshots", {
+  id: text("id").primaryKey(),
+  ownerId: text("owner_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull(),
+  key: text("key").notNull().default(""),
+  /** 原始 JSON（压缩后存） */
+  payload: text("payload").notNull(),
+  /** ETag，条件请求用 */
+  etag: text("etag"),
+  fetchedAt: integer("fetched_at", { mode: "timestamp" }).notNull(),
+  expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
 });

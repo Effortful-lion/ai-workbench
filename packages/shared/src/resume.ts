@@ -29,6 +29,10 @@ export interface ResumeSkillGroup {
 
 export interface ResumeProject {
   name: string;
+  /** 承担角色，如「技术负责人」——与工作经历的 role 对齐 */
+  role: string;
+  /** 项目起止时间，与工作经历的 period 对齐 */
+  period: string;
   desc: string;
   url: string;
   tags: string[];
@@ -39,6 +43,8 @@ export interface ResumeEducation {
   school: string;
   major: string;
   degree: string;
+  /** 绩点，如「3.11/5」；旧数据没有则空串 */
+  gpa: string;
 }
 
 /** 档案卡全文：对应终端里的 whoami / ls ./experience / cat education.log / cat skills.json / tree ./projects */

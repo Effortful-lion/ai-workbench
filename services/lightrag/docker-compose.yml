@@ -1,8 +1,15 @@
 services:
   ollama:
     image: ollama/ollama:latest
+    environment:
+      # 默认 num_parallel=1，并发 embedding 请求会排队导致 LightRAG 60s worker 超时
+      - OLLAMA_NUM_PARALLEL=8
+      # 避免模型冷启动造成首次 flush 大面积超时
+      - OLLAMA_KEEP_ALIVE=24h
     volumes:
-      - ollama_models:/root/.ollama
+      # 模型数据存放在项目目录内（services/lightrag/data/ollama_models），
+      # 用户可直接在项目中找到所有数据，无需进入 Docker 卷目录。
+      - ./data/ollama_models:/root/.ollama
     # 仅容器网络内可达，不暴露到宿主机
     restart: unless-stopped
 
@@ -20,6 +27,3 @@ services:
     depends_on:
       - ollama
     restart: unless-stopped
-
-volumes:
-  ollama_models:

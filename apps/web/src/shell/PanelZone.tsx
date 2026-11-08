@@ -15,6 +15,7 @@ import ToolboxPanel from "../features/tools/ToolboxPanel";
 import ToolsManagerPanel from "../features/aitools/ToolsManagerPanel";
 import HistoryPanel from "../features/history/HistoryPanel";
 import StatsPanel from "../features/stats/StatsPanel";
+import GithubPanel from "../features/github/GithubPanel";
 import { PANEL_META, usePanelStore, type PanelId } from "../stores/panel";
 
 const PANEL_BODY: Record<PanelId, () => ReactNode> = {
@@ -34,6 +35,7 @@ const PANEL_BODY: Record<PanelId, () => ReactNode> = {
   resume: () => <ResumePanel />,
   tools: () => <ToolboxPanel />,
   aitools: () => <ToolsManagerPanel />,
+  gh: () => <GithubPanel />,
 };
 
 /** 状态 B · 面板区：tabs + 内容 + ⤢ 全屏 */

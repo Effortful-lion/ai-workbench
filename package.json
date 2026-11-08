@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "pnpm -r --parallel run dev",
+    "dev": "pnpm --filter @aiwb/shared build && pnpm -r --parallel run dev",
     "dev:server": "pnpm --filter @aiwb/server dev",
     "dev:web": "pnpm --filter @aiwb/web dev",
     "cli": "node apps/cli/dist/cli.js",

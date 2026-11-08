@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ModelDto, ModelKind, ModelTestResult } from "@aiwb/shared";
 import { api } from "../../lib/api";
 import { useAuthStore } from "../../stores/auth";
+import { useToastStore } from "../../stores/toast";
 import { KIND_LABEL, PROVIDERS } from "./providers";
 
 const STATUS_COLOR: Record<ModelDto["status"], string> = {
@@ -145,8 +146,23 @@ export default function ModelsPanel() {
     else setShowAdd(false);
   };
 
+  /** 删除：先本地移除给出即时反馈，再以服务端列表收敛 */
   const remove = async (m: ModelDto) => {
-    await api(`/models/${m.id}`, { method: "DELETE" });
+    setModels((list) => list.filter((x) => x.id !== m.id));
+    if (editing?.id === m.id) cancelEdit();
+    try {
+      await api(`/models/${m.id}`, { method: "DELETE" });
+      useToastStore.getState().push(`已删除 ${m.provider}/${m.modelName}`, "info", 3000);
+    } catch (e) {
+      useToastStore.getState().push(`删除失败：${e instanceof Error ? e.message : String(e)}`, "err", 5000);
+    } finally {
+      await reload();
+    }
+  };
+
+  /** 设为全局默认：聊天未指定模型时服务端优先用它，避免"先出错再切换" */
+  const setDefault = async (m: ModelDto) => {
+    await api(`/models/${m.id}/default`, { method: "POST" });
     await reload();
   };
 
@@ -333,7 +349,14 @@ export default function ModelsPanel() {
               title={canWrite ? "点击编辑该模型" : undefined}
               onClick={() => startEdit(m)}
             >
-              <div className="text-[14px] font-bold text-tx">{m.modelName}</div>
+              <div className="flex items-center gap-2 text-[14px] font-bold text-tx">
+                {m.modelName}
+                {m.isDefault && (
+                  <span className="rounded-full border border-acc/40 bg-acc/10 px-1.5 py-px text-[10px] font-normal text-acc">
+                    默认
+                  </span>
+                )}
+              </div>
               <div className="mt-1 truncate text-[11px] text-tx3">{m.endpoint}</div>
               <div className="mt-2 flex flex-wrap gap-4 text-[11px] text-tx2">
                 <span>
@@ -371,6 +394,15 @@ export default function ModelsPanel() {
                     ? "▸ 向量测试"
                     : "▸ 对话测试"}
               </button>
+              {canWrite && !m.isDefault && (
+                <button
+                  className="text-[11px] text-tx3 hover:text-acc"
+                  onClick={() => setDefault(m)}
+                  title="设为默认模型：聊天未指定模型时优先使用"
+                >
+                  ★ 设为默认
+                </button>
+              )}
               {canWrite && (
                 <button className="ml-auto text-[11px] text-tx3 hover:text-err" onClick={() => remove(m)}>
                   ✗ 删除

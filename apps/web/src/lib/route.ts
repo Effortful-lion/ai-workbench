@@ -75,8 +75,8 @@ function applyRoute(r: RouteState) {
   }
 }
 
-/** 公开页 /p/:user、/t/:user 不参与 hash 路由 */
-const isPublicPath = () => /^\/(p|t)\//.test(window.location.pathname);
+/** 公开页 /p/:user、/t/:user、/c/:user 不参与 hash 路由 */
+const isPublicPath = () => /^\/(p|t|c)\//.test(window.location.pathname);
 
 /**
  * 双向同步 stores ↔ location.hash。

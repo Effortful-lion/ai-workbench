@@ -133,6 +133,18 @@ export interface MailAccountTestResult {
   latencyMs: number;
 }
 
+/** 邮件附件元信息：内容落盘，按 index 通过 /mail/messages/:id/attachments/:index 下载 */
+export interface MailAttachmentDto {
+  index: number;
+  filename: string;
+  contentType: string;
+  size: number;
+  /** 内嵌资源（cid / inline），不在附件区展示 */
+  inline: boolean;
+  /** 内容已落盘，可下载 */
+  available: boolean;
+}
+
 export interface MailMessageDto {
   id: string;
   accountId: string;
@@ -144,6 +156,10 @@ export interface MailMessageDto {
   toAddress: string;
   subject: string;
   body: string;
+  /** 原始 HTML 正文；纯文本邮件为 null（前端可切换 HTML / 纯文本） */
+  bodyHtml: string | null;
+  /** 附件元信息（二进制内容不随列表下发） */
+  attachments: MailAttachmentDto[];
   /** 正文首行截断，列表摘要用 */
   snippet: string;
   receivedAt: number;

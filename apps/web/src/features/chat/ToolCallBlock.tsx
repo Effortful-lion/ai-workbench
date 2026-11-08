@@ -24,7 +24,12 @@ export function groupMessages(messages: MessageDto[]): RenderGroup[] {
     const m = messages[i];
     // assistant 带原生 tool_calls → 收集后续 tool 消息合并进去
     if (m.role === "assistant" && m.toolCalls?.length) {
-      const calls = m.toolCalls.map((tc: ToolCallRef) => ({
+      const calls: {
+        toolCallId: string;
+        name: string;
+        argumentsText: string;
+        toolMessage?: MessageDto;
+      }[] = m.toolCalls.map((tc: ToolCallRef) => ({
         toolCallId: tc.id,
         name: tc.name,
         argumentsText: tc.arguments ?? "{}",
@@ -72,6 +77,15 @@ function resultSummary(content: string): string {
   const trimmed = content.trim();
   try {
     const j = JSON.parse(trimmed);
+    // search.multi 专用：跨源计数 + 降级标注
+    if (j && typeof j === "object" && "query" in j && ("github" in j || "web" in j || "kb" in j)) {
+      const parts: string[] = [];
+      if (Array.isArray(j.web)) parts.push(`网页 ${j.web.length}`);
+      if (Array.isArray(j.github)) parts.push(`GitHub ${j.github.length}`);
+      if (Array.isArray(j.kb)) parts.push(`知识库 ${j.kb.length}`);
+      if (Array.isArray(j.degraded) && j.degraded.length > 0) parts.push(`降级 ${j.degraded.length}`);
+      return parts.length > 0 ? `统一检索 · ${parts.join(" · ")}` : "统一检索 · 无结果";
+    }
     if (Array.isArray(j)) return `${j.length} 项`;
     if (j && typeof j === "object") {
       // 挑几个常见字段做摘要
@@ -137,12 +151,14 @@ function ToolCallItem({ call }: { call: { toolCallId: string; name: string; argu
             <div className="text-tx3">// arguments</div>
             <pre className="max-w-full overflow-x-auto whitespace-pre-wrap break-all text-tx2">{prettyJson(call.argumentsText)}</pre>
           </div>
-          {hasResult && (
+          {hasResult && call.name === "search.multi" ? (
+            <MultiSearchCards content={call.toolMessage!.content} />
+          ) : hasResult ? (
             <div>
               <div className="text-tx3">// result</div>
               <pre className="max-w-full overflow-x-auto whitespace-pre-wrap break-all text-tx2">{prettyJson(call.toolMessage!.content, 800)}</pre>
             </div>
-          )}
+          ) : null}
         </div>
       )}
     </div>
@@ -152,4 +168,143 @@ function ToolCallItem({ call }: { call: { toolCallId: string; name: string; argu
 /** Hook：把消息流自动分组 */
 export function useGroupedMessages(messages: MessageDto[]) {
   return useMemo(() => groupMessages(messages), [messages]);
+}
+
+// ── search.multi 专用结果卡 ─────────────────────────────
+
+interface MultiGhItem {
+  fullName: string;
+  description: string | null;
+  stars: number;
+  language: string | null;
+  pushedAt: string;
+  archived: boolean;
+  url: string;
+}
+interface MultiWebItem {
+  title: string;
+  url: string;
+  snippet: string;
+}
+interface MultiKbItem {
+  title: string;
+  snippet: string;
+}
+
+function relShort(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const day = Math.floor(diff / 86400000);
+  if (day < 1) return "今天";
+  if (day < 30) return `${day}d ago`;
+  const mo = Math.floor(day / 30);
+  if (mo < 12) return `${mo}mo ago`;
+  return `${Math.floor(mo / 12)}y ago`;
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+}
+
+/** search.multi 展开态：GitHub 行卡 + 网页 / 知识库行 */
+function MultiSearchCards({ content }: { content: string }) {
+  let data: {
+    web?: MultiWebItem[] | null;
+    github?: MultiGhItem[] | null;
+    kb?: MultiKbItem[] | null;
+    degraded?: string[];
+  } | null = null;
+  try {
+    data = JSON.parse(content);
+  } catch {
+    /* fallthrough */
+  }
+  if (!data || typeof data !== "object") {
+    return (
+      <div>
+        <div className="text-tx3">// result</div>
+        <pre className="max-w-full overflow-x-auto whitespace-pre-wrap break-all text-tx2">{prettyJson(content, 800)}</pre>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      {data.github && data.github.length > 0 && (
+        <div>
+          <div className="mb-1 text-tx3">// GitHub 仓库 ({data.github.length})</div>
+          <ul className="space-y-1">
+            {data.github.map((g) => (
+              <li key={g.fullName} className="rounded border border-line bg-bg px-2 py-1.5">
+                <div className="flex items-center gap-2">
+                  <a
+                    href={g.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="min-w-0 flex-1 truncate font-bold text-acc hover:underline"
+                  >
+                    {g.fullName}
+                  </a>
+                  {g.archived && (
+                    <span className="flex-none rounded border border-warn/40 px-1 text-[9px] text-warn">归档</span>
+                  )}
+                  <span className="flex-none text-[10px] text-tx3">↗</span>
+                </div>
+                {g.description && <div className="mt-0.5 truncate text-[10px] text-tx3">{g.description}</div>}
+                <div className="mt-0.5 flex gap-3 text-[9.5px] text-tx3">
+                  {g.language && <span>● {g.language}</span>}
+                  <span>★ {g.stars >= 1000 ? `${(g.stars / 1000).toFixed(1)}k` : g.stars}</span>
+                  <span>pushed {relShort(g.pushedAt)}</span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {data.web && data.web.length > 0 && (
+        <div>
+          <div className="mb-1 text-tx3">// 网页 ({data.web.length})</div>
+          <ul className="space-y-0.5">
+            {data.web.map((w, i) => (
+              <li key={`${w.url}-${i}`} className="flex items-baseline gap-2 text-[10.5px]">
+                <span className="flex-none text-tx3">[{hostOf(w.url)}]</span>
+                <a
+                  href={w.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="min-w-0 flex-1 truncate text-tx2 hover:text-acc hover:underline"
+                >
+                  {w.title}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {data.kb && data.kb.length > 0 && (
+        <div>
+          <div className="mb-1 text-tx3">// 知识库 ({data.kb.length})</div>
+          <ul className="space-y-0.5">
+            {data.kb.map((k, i) => (
+              <li key={`${k.title}-${i}`} className="text-[10.5px] text-tx2">
+                <span className="text-tx3">[kb]</span> {k.title}
+                <span className="text-tx3"> — {k.snippet.slice(0, 60)}…</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {data.degraded && data.degraded.length > 0 && (
+        <div className="rounded border border-warn/40 bg-warn/5 px-2 py-1 text-[10px] text-warn">
+          部分数据源降级：{data.degraded.join("；")}
+        </div>
+      )}
+      {!data.github?.length && !data.web?.length && !data.kb?.length && (
+        <div className="text-[10.5px] text-tx3">// 无结果</div>
+      )}
+    </div>
+  );
 }

@@ -1,7 +1,7 @@
 import { create } from "zustand";
 
 /** 面板注册表：已实现的映射到真实组件，其余显示占位 */
-export const PANEL_IDS = ["models", "agents", "history", "stats", "kb", "projects", "code", "cal", "mail", "notify", "biz", "crm", "pipe", "resume", "tools", "aitools"] as const;
+export const PANEL_IDS = ["models", "agents", "history", "stats", "kb", "projects", "code", "cal", "mail", "notify", "biz", "crm", "pipe", "resume", "tools", "aitools", "gh"] as const;
 export type PanelId = (typeof PANEL_IDS)[number];
 
 export const PANEL_META: Record<PanelId, { title: string; path: string }> = {
@@ -21,6 +21,7 @@ export const PANEL_META: Record<PanelId, { title: string; path: string }> = {
   resume: { title: "个人简历", path: "~/me" },
   tools: { title: "百宝箱", path: "~/tools" },
   aitools: { title: "工具管理", path: "~/aitools" },
+  gh: { title: "GitHub 观察窗", path: "~/gh" },
 };
 
 interface PanelState {

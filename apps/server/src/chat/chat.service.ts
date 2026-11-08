@@ -3,8 +3,8 @@ import { and, desc, eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import type { ConversationDto, MessageDto, MessageRole, ToolCallRef } from "@aiwb/shared";
 import { DB, type Db } from "../db/db.module";
-import { conversations, messages, models } from "../db/schema";
-import { decrypt } from "../common/crypto";
+import { conversations, messages } from "../db/schema";
+import { ModelsService } from "../models/models.service";
 
 export interface MessageMeta {
   toolCalls?: ToolCallRef[];
@@ -13,7 +13,10 @@ export interface MessageMeta {
 
 @Injectable()
 export class ChatService {
-  constructor(@Inject(DB) private readonly db: Db) {}
+  constructor(
+    @Inject(DB) private readonly db: Db,
+    private readonly models: ModelsService,
+  ) {}
 
   private toConversationDto(c: typeof conversations.$inferSelect): ConversationDto {
     return {
@@ -105,26 +108,9 @@ export class ChatService {
     await this.db.delete(conversations).where(eq(conversations.id, id));
   }
 
-  /** 挑选对话模型：指定 id 优先；否则 status=ok 的第一个；再退到任意已配置模型 */
+  /** 挑选对话模型：委托给 ModelsService（单一实现，避免循环依赖） */
   async pickModel(modelId?: string) {
-    const rows = await this.db.select().from(models);
-    const pick =
-      (modelId ? rows.find((m) => m.id === modelId) : undefined) ??
-      rows.find((m) => m.status === "ok") ??
-      rows[0];
-    if (!pick) return null;
-    const meta = (pick.metaJson as { temperature?: number | null; topK?: number | null } | null) ?? null;
-    return {
-      id: pick.id,
-      modelName: pick.modelName,
-      provider: pick.provider,
-      endpoint: pick.endpoint,
-      apiKey: pick.apiKeyEnc ? decrypt(pick.apiKeyEnc) : null,
-      priceIn: pick.priceIn,
-      priceOut: pick.priceOut,
-      temperature: meta?.temperature,
-      topK: meta?.topK,
-    };
+    return this.models.pickModel(modelId);
   }
 
   /** 取会话的模型上下文（最近 20 条，截断防 token 爆炸）——同时带 toolCallId / toolCalls 供原生 function calling 还原 */

@@ -72,6 +72,7 @@ export type TraceEventType =
   | "agent.started"
   | "agent.done"
   | "agent.failed"
+  | "agent.aborted"
   | "budget.hit"
   | "sub.started"
   | "sub.done";

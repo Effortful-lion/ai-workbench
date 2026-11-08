@@ -13,7 +13,6 @@ import {
   UseInterceptors,
 } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
-import { createReadStream } from "node:fs";
 import type { ToolboxItemInput } from "@aiwb/shared";
 import { JwtAuthGuard, CurrentUser, type AuthUser } from "../auth/jwt-auth.guard";
 import { PermissionGuard, RequirePerm } from "../common/permission.guard";
@@ -85,7 +84,7 @@ export class ToolboxController {
       "content-disposition": `attachment; filename="${fallback || "download"}"; filename*=UTF-8''${encodeURIComponent(f.fileName)}`,
       "cache-control": "private, max-age=0",
     });
-    return new StreamableFile(createReadStream(f.path));
+    return new StreamableFile(f.stream);
   }
 
   /** 游客公开只读墙 /t/:username 的数据源 */

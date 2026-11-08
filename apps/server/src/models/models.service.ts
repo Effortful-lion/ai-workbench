@@ -63,10 +63,56 @@ export class ModelsService implements OnModuleInit {
       kind: "chat",
       apiKeyEnc: null,
       status: "ok",
+      isDefault: false,
       metaJson: { seeded: true, note: "内置 mock，无 key 可用" },
       createdAt: new Date(),
     });
     this.log.log("▸ 已创建 mock://mock-1 模型（开发/演示用）");
+  }
+
+  /** 挑选对话模型：指定 id 优先；否则用默认模型；再退到 status=ok 的第一个；最后任意已配置模型。
+   *  preferReal=true 时跳过 mock:// 模型（用于意图路由等需要真实推理的场景）。
+   *  从 ChatService 迁到此处，消除 KbModule → ChatModule 的循环依赖。 */
+  async pickModel(modelId?: string, opts: { preferReal?: boolean } = {}) {
+    const rows = await this.db.select().from(models);
+    let pool = rows;
+    if (opts.preferReal) pool = pool.filter((m) => !m.endpoint.startsWith("mock://"));
+    const pick =
+      (modelId ? pool.find((m) => m.id === modelId) : undefined) ??
+      pool.find((m) => m.isDefault) ??
+      pool.find((m) => m.status === "ok") ??
+      pool[0];
+    if (!pick) return null;
+    const meta = (pick.metaJson as { temperature?: number | null; topK?: number | null } | null) ?? null;
+    return {
+      id: pick.id,
+      modelName: pick.modelName,
+      provider: pick.provider,
+      endpoint: pick.endpoint,
+      apiKey: pick.apiKeyEnc ? decrypt(pick.apiKeyEnc) : null,
+      priceIn: pick.priceIn,
+      priceOut: pick.priceOut,
+      temperature: meta?.temperature,
+      topK: meta?.topK,
+    };
+  }
+
+  /** 返回所有状态 ok 且非 mock 的模型（带解密密钥），供路由等场景依次尝试 */
+  async listRealModels() {
+    const rows = await this.db.select().from(models);
+    return rows
+      .filter((m) => m.status === "ok" && !m.endpoint.startsWith("mock://"))
+      .map((m) => {
+        const meta = (m.metaJson as { temperature?: number | null } | null) ?? null;
+        return {
+          id: m.id,
+          modelName: m.modelName,
+          provider: m.provider,
+          endpoint: m.endpoint,
+          apiKey: m.apiKeyEnc ? decrypt(m.apiKeyEnc) : null,
+          temperature: meta?.temperature,
+        };
+      });
   }
 
   toDto(m: typeof models.$inferSelect): ModelDto {
@@ -78,6 +124,7 @@ export class ModelsService implements OnModuleInit {
       kind: m.kind,
       hasKey: Boolean(m.apiKeyEnc),
       status: m.status,
+      isDefault: m.isDefault,
       priceIn: m.priceIn,
       priceOut: m.priceOut,
       meta: (m.metaJson as ModelDto["meta"]) ?? null,
@@ -103,6 +150,7 @@ export class ModelsService implements OnModuleInit {
       kind: input.kind ?? "chat",
       apiKeyEnc: input.apiKey ? encrypt(input.apiKey) : null,
       status: "untested",
+      isDefault: false,
       priceIn: input.priceIn ?? 0,
       priceOut: input.priceOut ?? 0,
       metaJson: Object.keys(meta).length > 0 ? meta : null,
@@ -141,6 +189,15 @@ export class ModelsService implements OnModuleInit {
 
   async remove(id: string) {
     await this.db.delete(models).where(eq(models.id, id));
+  }
+
+  /** 设置全局默认模型：先清空其它模型的标记，再置顶目标（保证唯一） */
+  async setDefault(id: string): Promise<ModelDto> {
+    const [m] = await this.db.select().from(models).where(eq(models.id, id));
+    if (!m) throw new NotFoundException("model not found");
+    await this.db.update(models).set({ isDefault: false }).where(eq(models.isDefault, true));
+    await this.db.update(models).set({ isDefault: true }).where(eq(models.id, id));
+    return this.toDto({ ...m, isDefault: true });
   }
 
   /** 测试：对话模型走 chat，向量模型走 embed；结果回写状态灯与延迟 */

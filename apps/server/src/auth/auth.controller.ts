@@ -10,7 +10,9 @@ export class AuthController {
   register(@Body() body: { username?: string; password?: string }) {
     const { username = "", password = "" } = body ?? {};
     if (username.length < 2) throw new BadRequestException("username 至少 2 个字符");
-    if (password.length < 6) throw new BadRequestException("password 至少 6 个字符");
+    // 与 MinIO root 密码规则对齐（MINIO_ROOT_PASSWORD 至少 8 位），
+    // 网站管理员账号同时作为 MinIO root，规则统一避免「网站能建、对象存储起不来」
+    if (password.length < 8) throw new BadRequestException("password 至少 8 位（与 MinIO root 密码规则一致）");
     return this.auth.register(username, password);
   }
 

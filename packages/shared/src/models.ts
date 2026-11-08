@@ -19,6 +19,8 @@ export interface ModelDto {
   /** 是否已配置 key（永不回传明文） */
   hasKey: boolean;
   status: ModelStatus;
+  /** 默认模型：聊天未指定 modelId 时优先选用（全局唯一） */
+  isDefault: boolean;
   /** 定价：分 / 1k tokens；0 = 未知/不计费 */
   priceIn: number;
   priceOut: number;

@@ -14,12 +14,13 @@ import CliOverlay from "./shell/CliOverlay";
 import ToastHost from "./shell/ToastHost";
 import PublicResumePage from "./features/resume/PublicResumePage";
 import PublicToolboxPage from "./features/tools/PublicToolboxPage";
+import PublicContactPage from "./features/contact/PublicContactPage";
 import { useVisitorCollector } from "./lib/collector";
 import { useHashRoute } from "./lib/route";
 
 export default function App() {
   const user = useAuthStore((s) => s.user);
-  const { theme, cliOpen, setPalette } = useUiStore();
+  const { theme, cliOpen, setPalette, mobileView, setMobileView } = useUiStore();
   const panelCount = usePanelStore((s) => s.open.length);
   const currentId = useChatStore((s) => s.currentId);
   const pendingNew = useChatStore((s) => s.pendingNew);
@@ -32,6 +33,11 @@ export default function App() {
   useEffect(() => {
     if (user) connect();
   }, [user, connect]);
+
+  // 移动端：打开面板自动切到面板视图，全部关闭回到对话视图（桌面端始终同屏，忽略此状态）
+  useEffect(() => {
+    setMobileView(panelCount > 0 ? "panel" : "chat");
+  }, [panelCount, setMobileView]);
 
   // ⌘K 全局唤起
   useEffect(() => {
@@ -51,7 +57,7 @@ export default function App() {
   // hash 路由：刷新后还原面板 / 会话 / CLI 状态
   useHashRoute(!!user);
 
-  // 公开页 /p/:username（简历）与 /t/:username（百宝箱）：游客无需登录，只读
+  // 公开页 /p/:username（简历）、/t/:username（百宝箱）、/c/:username（联系我）：游客无需登录，只读
   const decoded = (raw: string | undefined) => {
     if (!raw) return null;
     try {
@@ -64,6 +70,8 @@ export default function App() {
   if (publicResume) return <PublicResumePage username={publicResume} />;
   const publicToolbox = decoded(window.location.pathname.match(/^\/t\/([^/]+)\/?$/)?.[1]);
   if (publicToolbox) return <PublicToolboxPage username={publicToolbox} />;
+  const publicContact = decoded(window.location.pathname.match(/^\/c\/([^/]+)\/?$/)?.[1]);
+  if (publicContact) return <PublicContactPage username={publicContact} />;
 
   if (!user) return <LoginScreen />;
 
@@ -80,10 +88,31 @@ export default function App() {
           <HeroState />
         ) : (
           <div className="flex h-full">
-            <div className={panelCount > 0 ? "w-[400px] flex-none border-r border-line" : "min-w-0 flex-1"}>
+            {/* 桌面端：聊天栏固定 400px 与面板同屏；移动端（<lg）：聊天/面板互斥全屏，由 mobileView 决定 */}
+            <div
+              className={
+                panelCount > 0
+                  ? `${mobileView === "chat" ? "flex" : "hidden"} w-full flex-col border-line lg:flex lg:w-[400px] lg:flex-none lg:border-r`
+                  : "min-w-0 flex-1"
+              }
+            >
               <ChatColumn />
             </div>
-            {panelCount > 0 && <PanelZone />}
+            {panelCount > 0 && (
+              <div className={`${mobileView === "panel" ? "flex" : "hidden"} min-w-0 flex-1 flex-col lg:flex`}>
+                <PanelZone />
+              </div>
+            )}
+            {/* 移动端浮动切换按钮：聊天 ⇄ 面板 */}
+            {panelCount > 0 && (
+              <button
+                className="fixed bottom-14 right-4 z-40 flex h-10 items-center gap-1.5 rounded-full border border-acc/60 bg-bg1 px-3.5 font-mono text-[11px] text-acc shadow-[0_4px_16px_rgba(0,0,0,0.45)] lg:hidden"
+                onClick={() => setMobileView(mobileView === "chat" ? "panel" : "chat")}
+                title={mobileView === "chat" ? "查看面板" : "回到对话"}
+              >
+                {mobileView === "chat" ? "▤ 面板" : "✉ 对话"}
+              </button>
+            )}
           </div>
         )}
       </main>

@@ -8,6 +8,7 @@ const TYPE_COLOR: Record<string, string> = {
   "agent.started": "text-acc",
   "agent.done": "text-acc",
   "agent.failed": "text-err",
+  "agent.aborted": "text-warn",
   "phase.started": "text-tx",
   "phase.done": "text-tx2",
   "tool.started": "text-warn",
@@ -20,7 +21,7 @@ const TYPE_COLOR: Record<string, string> = {
 
 /** 类型 → 层级（用于缩进） */
 const TYPE_DEPTH: Record<string, number> = {
-  "agent.started": 0, "agent.done": 0, "agent.failed": 0,
+  "agent.started": 0, "agent.done": 0, "agent.failed": 0, "agent.aborted": 0,
   "budget.hit": 0,
   "phase.started": 1, "phase.done": 1,
   "sub.started": 1, "sub.done": 1,
@@ -32,6 +33,7 @@ const TYPE_ICON: Record<string, string> = {
   "agent.started": "▶",
   "agent.done": "✓",
   "agent.failed": "✗",
+  "agent.aborted": "■",
   "phase.started": "◐",
   "phase.done": "◑",
   "tool.started": "▸",
@@ -125,7 +127,7 @@ export default function TracePanel() {
   // 加载历史（恢复会话时）
   useEffect(() => {
     if (!currentId) { setHistory([]); return; }
-    api<AgentExecutionTrace[]>(`/agents/executions/latest?conversationId=${currentId}`)
+    api<AgentExecutionTrace | null>(`/agents/executions/latest?conversationId=${currentId}`)
       .then((t) => { if (t && t.events?.length) setHistory([t]); })
       .catch(() => {});
   }, [currentId]);
@@ -141,6 +143,7 @@ export default function TracePanel() {
     // 提取最终状态
     const lastEvent = traceEvents[traceEvents.length - 1] ?? history[0]?.events?.slice(-1)[0];
     const finalOk = lastEvent?.type === "agent.done";
+    const finalStop = lastEvent?.type === "agent.aborted";
     const finalFail = lastEvent?.type === "agent.failed" || lastEvent?.type === "budget.hit";
 
     return (
@@ -153,6 +156,8 @@ export default function TracePanel() {
             <span className="text-acc animate-pulse">●</span>
           ) : finalOk ? (
             <span className="text-acc">✓</span>
+          ) : finalStop ? (
+            <span className="text-warn">■</span>
           ) : finalFail ? (
             <span className="text-err">✗</span>
           ) : (

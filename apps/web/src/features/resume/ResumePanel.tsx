@@ -3,6 +3,51 @@ import type { ResumeDto, ResumeImportResult } from "@aiwb/shared";
 import { api } from "../../lib/api";
 import ResumeCard from "./ResumeCard";
 
+/** 带行号的 JSON 编辑器：行号栏与文本框同字号/行高，滚动同步，方便定位报错行 */
+function LineNumberedEditor({
+  value,
+  onChange,
+  height = 380,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  height?: number;
+}) {
+  const gutterRef = useRef<HTMLDivElement>(null);
+  const taRef = useRef<HTMLTextAreaElement>(null);
+  const lineCount = Math.max(1, value.split("\n").length);
+
+  return (
+    <div
+      className="flex overflow-hidden rounded border border-line bg-bg focus-within:border-acc"
+      style={{ height }}
+    >
+      <div
+        ref={gutterRef}
+        className="h-full w-11 flex-none select-none overflow-hidden border-r border-line bg-bg1 py-3 text-right font-mono text-[12px] leading-5 text-tx3"
+      >
+        {Array.from({ length: lineCount }, (_, i) => (
+          <div key={i} className="pr-2">
+            {i + 1}
+          </div>
+        ))}
+      </div>
+      <textarea
+        ref={taRef}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onScroll={() => {
+          // 只同步纵向：横向各自滚动，避免长行把行号错位
+          if (gutterRef.current && taRef.current) gutterRef.current.scrollTop = taRef.current.scrollTop;
+        }}
+        wrap="off"
+        spellCheck={false}
+        className="h-full flex-1 resize-none overflow-auto whitespace-pre bg-transparent px-3 py-3 font-mono text-[12px] leading-5 text-tx outline-none"
+      />
+    </div>
+  );
+}
+
 /** 个人简历面板：导入(文本/PDF/Word) → 解析 → 文档卡渲染 */
 export default function ResumePanel() {
   const [data, setData] = useState<ResumeDto | null>(null);
@@ -101,7 +146,16 @@ export default function ResumePanel() {
     try {
       parsed = JSON.parse(draft);
     } catch (e) {
-      setEditError(`JSON 解析失败：${e instanceof Error ? e.message : String(e)}`);
+      const msg = e instanceof Error ? e.message : String(e);
+      // V8 报错带 position 或 line，换算成编辑器的行号，配合行号栏直接定位
+      const lineMatch = msg.match(/line (\d+)/i);
+      const posMatch = msg.match(/position (\d+)/i);
+      const line = lineMatch
+        ? Number(lineMatch[1])
+        : posMatch
+          ? draft.slice(0, Math.min(Number(posMatch[1]), draft.length)).split("\n").length
+          : null;
+      setEditError(`${line ? `第 ${line} 行 · ` : ""}JSON 解析失败：${msg}`);
       return;
     }
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
@@ -318,12 +372,7 @@ export default function ResumePanel() {
             <span className="truncate">编辑档案卡数据</span>
             <span className="flex-none text-tx3">JSON</span>
           </div>
-          <textarea
-            className="h-[360px] w-full resize-y border border-line bg-bg p-3 text-[12px] leading-relaxed text-tx outline-none focus:border-acc"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            spellCheck={false}
-          />
+          <LineNumberedEditor value={draft} onChange={setDraft} />
           <div className="mt-2 flex flex-wrap items-center gap-3">
             <button
               className="rounded border border-line px-3 py-1 text-[11px] text-tx2 hover:border-acc hover:text-acc disabled:opacity-40"

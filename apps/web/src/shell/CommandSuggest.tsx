@@ -9,7 +9,7 @@ interface Props {
   onClose?: () => void;
 }
 
-/** 输入框下方的斜杠命令下拉。输入 "/" 时浮现，↑↓ 选择，Enter 确认，Esc 关闭 */
+/** 输入框上方的斜杠命令下拉。输入 "/" 时向上浮现（输入框在屏幕底部，向下展开会被裁掉），↑↓ 选择，Enter 确认，Esc 关闭 */
 export default function CommandSuggest({ text, onPick, onClose }: Props) {
   const [active, setActive] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
@@ -58,11 +58,8 @@ export default function CommandSuggest({ text, onPick, onClose }: Props) {
   return (
     <div
       ref={listRef}
-      className="absolute left-0 right-0 top-full z-20 mt-1 max-h-[320px] overflow-auto rounded-lg border border-acc/60 bg-bg1 shadow-[0_8px_24px_rgba(0,0,0,0.4)]"
+      className="absolute bottom-full left-0 right-0 z-20 mb-1 max-h-[320px] overflow-auto rounded-lg border border-acc/60 bg-bg1 shadow-[0_-8px_24px_rgba(0,0,0,0.4)]"
     >
-      <div className="sticky top-0 border-b border-line bg-bg1/95 px-3 py-1.5 font-mono text-[10px] text-tx3 backdrop-blur">
-        ⌄ 可用命令  ·  ↑↓ 选择  ·  ⏎ 执行  ·  Esc 关闭
-      </div>
       {filtered.map((c, i) => (
         <button
           key={c.cmd}
@@ -84,6 +81,9 @@ export default function CommandSuggest({ text, onPick, onClose }: Props) {
           </span>
         </button>
       ))}
+      <div className="sticky bottom-0 border-t border-line bg-bg1/95 px-3 py-1.5 font-mono text-[10px] text-tx3 backdrop-blur">
+        ⌃ 可用命令  ·  ↑↓ 选择  ·  ⏎ 执行  ·  Esc 关闭
+      </div>
     </div>
   );
 }

@@ -388,7 +388,9 @@ export class PipeService {
     return out.slice(0, MAX_OUTPUT);
   }
 
-  /** 顺序执行 SOP 的每一步，失败即中断并把剩余步骤标记 skipped */
+  /** 顺序执行 SOP 的每一步，失败即中断并把剩余步骤标记 skipped。
+   *  异步执行：立即创建 run 记录并返回，后台逐步执行（每步开始写 running、结束更新），
+   *  前端通过轮询 getRun/listRuns 拿到实时进度。 */
   async runSop(userId: string, sopId: string, rawInput?: string): Promise<PipeRunDto> {
     const sop = await this.ownedSop(userId, sopId);
     if (sop.status === "running") throw new BadRequestException("该 SOP 正在运行");
@@ -420,8 +422,113 @@ export class PipeService {
       .set({ status: "running", updatedAt: startedAt })
       .where(eq(pipeSops.id, sop.id));
 
+    // 后台执行：不 await，让 HTTP 请求立即返回 runId
+    void this.executeRun(runId, userId, sop, model, input, startedAt).catch((e) => {
+      // 兜底：后台执行自身抛错（正常步骤失败已在 executeRun 内部捕获）时把 run 标记失败
+      console.error(`[pipe] run ${runId} crashed:`, e);
+      void this.db
+        .update(pipeRuns)
+        .set({ status: "failed", error: String(e), finishedAt: new Date() })
+        .where(eq(pipeRuns.id, runId));
+      void this.db
+        .update(pipeSops)
+        .set({ status: "idle", updatedAt: new Date() })
+        .where(eq(pipeSops.id, sop.id));
+    });
+
+    return this.getRun(userId, runId);
+  }
+
+  /** 断点重试：从上次失败的第 fromStep 步重跑，前 fromStep 步复用上次产出（标 skipped 不重复执行）。
+   *  用上次 run 的 input 与 SOP 当前步骤定义，前序产出拼接作为 prior 注入，保证上下文连续。 */
+  async retryRunFromStep(userId: string, runId: string, fromStep: number): Promise<PipeRunDto> {
+    const prev = await this.getRun(userId, runId);
+    if (!prev.sopId) throw new BadRequestException("原 SOP 已删除，无法重试");
+    const sop = await this.ownedSop(userId, prev.sopId);
+    if (sop.status === "running") throw new BadRequestException("该 SOP 正在运行");
+
+    const totalSteps = sop.stepsJson.length;
+    const start = Math.max(0, Math.min(Math.round(fromStep), totalSteps - 1));
+    if (start === 0) {
+      // 从第 0 步重试等价于整 run 重跑
+      return this.runSop(userId, prev.sopId, prev.input);
+    }
+
+    // 拼接前 start 步的产出作为 prior：取上次 run 中这些步的 output（done 步），按序连接
+    const priorOutputs = prev.steps
+      .filter((s) => s.index < start && s.status === "done" && s.output)
+      .sort((a, b) => a.index - b.index)
+      .map((s) => s.output);
+    if (priorOutputs.length < start) {
+      throw new BadRequestException(
+        `前 ${start} 步缺少可复用产出（仅 ${priorOutputs.length} 步成功），请从更早的步骤重试`,
+      );
+    }
+    const priorOutput = priorOutputs.join("\n\n").slice(-3000);
+
+    const model = await this.pickModel(sop);
+    const startedAt = new Date();
+    const newRunId = randomUUID();
+
+    await this.db.insert(pipeRuns).values({
+      id: newRunId,
+      ownerId: userId,
+      sopId: sop.id,
+      sopName: sop.name,
+      input: prev.input,
+      output: "",
+      error: null,
+      status: "running",
+      stepTotal: totalSteps,
+      stepDone: start, // 前 start 步视为已完成（复用），进度从断点开始
+      durationMs: 0,
+      startedAt,
+      finishedAt: null,
+    });
+    await this.db
+      .update(pipeSops)
+      .set({ status: "running", updatedAt: startedAt })
+      .where(eq(pipeSops.id, sop.id));
+
+    void this.executeRun(newRunId, userId, sop, model, prev.input, startedAt, start, priorOutput).catch(
+      (e) => {
+        console.error(`[pipe] run ${newRunId} crashed:`, e);
+        void this.db
+          .update(pipeRuns)
+          .set({ status: "failed", error: String(e), finishedAt: new Date() })
+          .where(eq(pipeRuns.id, newRunId));
+        void this.db
+          .update(pipeSops)
+          .set({ status: "idle", updatedAt: new Date() })
+          .where(eq(pipeSops.id, sop.id));
+      },
+    );
+
+    return this.getRun(userId, newRunId);
+  }
+
+  /** 后台执行体：逐步跑，每步先插 running 记录，完成/失败后更新，失败中断后续标 skipped。
+   *  断点重试：fromStep > 0 时，前 fromStep 步直接标 skipped（复用上次产出），
+   *  从 fromStep 开始真正执行，priorOutput 作为前序上下文注入。 */
+  private async executeRun(
+    runId: string,
+    userId: string,
+    sop: SopRow,
+    model: {
+      endpoint: string;
+      apiKey: string | null;
+      modelName: string;
+      provider: string;
+      temperature?: number | null;
+      topK?: number | null;
+    },
+    input: string,
+    startedAt: Date,
+    fromStep = 0,
+    priorOutput = "",
+  ): Promise<void> {
     const t0 = Date.now();
-    let prior = "";
+    let prior = priorOutput;
     let stepDone = 0;
     let lastOutput = "";
     let failure: string | null = null;
@@ -430,6 +537,22 @@ export class PipeService {
       const stepStart = Date.now();
       const stepInput = this.buildStepPrompt(sop, step.name, step.instruction, i, input, prior);
       const stepId = randomUUID();
+
+      // 断点重试：前 fromStep 步复用上次结果，标 skipped 不重复执行
+      if (i < fromStep) {
+        await this.db.insert(pipeRunSteps).values({
+          id: stepId,
+          runId,
+          stepIndex: i,
+          name: step.name,
+          status: "skipped",
+          input: stepInput,
+          output: "",
+          error: null,
+          durationMs: 0,
+        });
+        continue;
+      }
 
       if (failure) {
         await this.db.insert(pipeRunSteps).values({
@@ -446,35 +569,36 @@ export class PipeService {
         continue;
       }
 
+      // 步骤开始：先写 running，前端轮询能看到「执行到哪一步」
+      await this.db.insert(pipeRunSteps).values({
+        id: stepId,
+        runId,
+        stepIndex: i,
+        name: step.name,
+        status: "running",
+        input: stepInput,
+        output: "",
+        error: null,
+        durationMs: 0,
+      });
+
       try {
         const out = await this.callModel(model, step.name, stepInput);
-        await this.db.insert(pipeRunSteps).values({
-          id: stepId,
-          runId,
-          stepIndex: i,
-          name: step.name,
-          status: "done",
-          input: stepInput,
-          output: out,
-          error: null,
-          durationMs: Date.now() - stepStart,
-        });
+        await this.db
+          .update(pipeRunSteps)
+          .set({ status: "done", output: out, durationMs: Date.now() - stepStart })
+          .where(eq(pipeRunSteps.id, stepId));
         stepDone += 1;
         prior = out.slice(-3000);
         lastOutput = out;
+        // 每完成一步同步 stepDone，让 run 级别的进度也实时可见
+        await this.db.update(pipeRuns).set({ stepDone }).where(eq(pipeRuns.id, runId));
       } catch (e) {
         failure = e instanceof Error ? e.message : String(e);
-        await this.db.insert(pipeRunSteps).values({
-          id: stepId,
-          runId,
-          stepIndex: i,
-          name: step.name,
-          status: "failed",
-          input: stepInput,
-          output: "",
-          error: failure,
-          durationMs: Date.now() - stepStart,
-        });
+        await this.db
+          .update(pipeRunSteps)
+          .set({ status: "failed", error: failure, durationMs: Date.now() - stepStart })
+          .where(eq(pipeRunSteps.id, stepId));
       }
     }
 
@@ -494,8 +618,6 @@ export class PipeService {
       .update(pipeSops)
       .set({ status: "idle", updatedAt: finishedAt })
       .where(eq(pipeSops.id, sop.id));
-
-    return this.getRun(userId, runId);
   }
 
   async getRun(userId: string, id: string): Promise<PipeRunDto> {

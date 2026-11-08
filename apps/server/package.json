@@ -6,6 +6,7 @@
     "dev": "nest start --watch",
     "build": "nest build",
     "start": "node dist/main.js",
+    "start:lightrag": "KB_PROVIDER=lightrag LIGHTRAG_URL=http://localhost:9621 LIGHTRAG_API_KEY=$(grep '^LIGHTRAG_API_KEY=' ../../services/lightrag/.env | cut -d= -f2-) ADMIN_USER=$(grep '^ADMIN_USER=' ../../.env | cut -d= -f2-) ADMIN_PASS=$(grep '^ADMIN_PASS=' ../../.env | cut -d= -f2-) MINIO_ACCESS_KEY=$(grep '^ADMIN_USER=' ../../.env | cut -d= -f2-) MINIO_SECRET_KEY=$(grep '^ADMIN_PASS=' ../../.env | cut -d= -f2-) node --enable-source-maps dist/main",
     "db:push": "drizzle-kit push"
   },
   "dependencies": {
@@ -21,6 +22,7 @@
     "imapflow": "^2.10.0",
     "mailparser": "^3.14.1",
     "mammoth": "^1.13.0",
+    "minio": "^8.0.7",
     "nodemailer": "^10.3.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ResumeDto } from "@aiwb/shared";
 import ResumeCard from "./ResumeCard";
+import PublicBackLink from "../public/PublicBackLink";
 
 /** 游客公开只读页 /p/:username，不经过登录态 */
 export default function PublicResumePage({ username }: { username: string }) {
@@ -23,12 +24,10 @@ export default function PublicResumePage({ username }: { username: string }) {
   return (
     <div className="grid-bg flex min-h-full flex-col items-center px-4 py-8 font-mono">
       <div className="mb-4 flex w-[min(880px,100%)] items-center justify-between text-[11px] text-tx3">
-        <span>
+        <span className="min-w-0 truncate">
           <span className="text-acc">▸</span> AI-WORKBENCH · public profile
         </span>
-        <a className="hover:text-acc" href="/">
-          ← 返回工作台
-        </a>
+        <PublicBackLink />
       </div>
 
       <div className="w-[min(880px,100%)]">

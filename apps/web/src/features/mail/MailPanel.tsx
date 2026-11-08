@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
   MailAccountDto,
+  MailAttachmentDto,
   MailAccountTestResult,
   MailCategory,
   MailDigestDto,
@@ -9,7 +10,7 @@ import type {
   MailSyncResult,
 } from "@aiwb/shared";
 import { MAIL_PROVIDER_PRESETS } from "@aiwb/shared";
-import { api } from "../../lib/api";
+import { api, apiBlob } from "../../lib/api";
 import { useAuthStore } from "../../stores/auth";
 
 const FOLDERS: { id: MailFolder; label: string }[] = [
@@ -125,6 +126,39 @@ export default function MailPanel() {
   const [accError, setAccError] = useState<string | null>(null);
   const [testedId, setTestedId] = useState<string | null>(null);
 
+  // 写邮件弹窗：可视化 compose + 发件邮箱选择（每个账户各自 SMTP）
+  const [composeOpen, setComposeOpen] = useState(false);
+  const [composeFrom, setComposeFrom] = useState("");
+  const [composeTo, setComposeTo] = useState("");
+  const [composeSubject, setComposeSubject] = useState("");
+  const [composeBody, setComposeBody] = useState("");
+  const [composeBusy, setComposeBusy] = useState(false);
+  const [composeError, setComposeError] = useState<string | null>(null);
+  const [composeSuccess, setComposeSuccess] = useState<string | null>(null);
+  // 正文渲染方式：有 HTML 时默认渲染 HTML，可切回纯文本
+  const [bodyMode, setBodyMode] = useState<"html" | "text">("html");
+  const [downloadBusy, setDownloadBusy] = useState<number | null>(null);
+
+  useEffect(() => {
+    setBodyMode("html");
+  }, [selectedId]);
+
+  // 成功后停顿 1.5s 展示结果，再自动关闭弹窗
+  useEffect(() => {
+    if (!composeSuccess) return;
+    const timer = window.setTimeout(() => setComposeOpen(false), 1500);
+    return () => window.clearTimeout(timer);
+  }, [composeSuccess]);
+
+  useEffect(() => {
+    if (!composeOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setComposeOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [composeOpen]);
+
   const selected = useMemo(
     () => messages.find((m) => m.id === selectedId) ?? null,
     [messages, selectedId],
@@ -143,6 +177,8 @@ export default function MailPanel() {
       setAccounts(accs);
       setDigest(dig);
       setError(null);
+      // 通知顶栏邮件入口同步未读红点
+      window.dispatchEvent(new CustomEvent("aiwb:mail-changed", { detail: { unread: dig.unread } }));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -247,6 +283,27 @@ export default function MailPanel() {
     }
   };
 
+  const downloadAttachment = async (m: MailMessageDto, a: MailAttachmentDto) => {
+    if (downloadBusy !== null) return;
+    setDownloadBusy(a.index);
+    try {
+      const blob = await apiBlob(`/mail/messages/${m.id}/attachments/${a.index}`);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = a.filename;
+      link.style.display = "none";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDownloadBusy(null);
+    }
+  };
+
   const sendReply = async () => {
     if (!selected || !replyBody.trim() || busy) return;
     setBusy(true);
@@ -303,6 +360,57 @@ export default function MailPanel() {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const openCompose = (prefill?: { to?: string; subject?: string; body?: string }) => {
+    setComposeFrom(accounts[0]?.id ?? "");
+    setComposeTo(prefill?.to ?? "");
+    setComposeSubject(prefill?.subject ?? "");
+    setComposeBody(prefill?.body ?? "");
+    setComposeError(null);
+    setComposeSuccess(null);
+    setComposeOpen(true);
+  };
+
+  const submitCompose = async (draft: boolean) => {
+    if (composeBusy) return;
+    const to = composeTo.trim();
+    if (!to.includes("@")) {
+      setComposeError("收件人需为邮箱地址，如 alice@example.com");
+      return;
+    }
+    if (!composeSubject.trim()) {
+      setComposeError("请填写主题");
+      return;
+    }
+    setComposeBusy(true);
+    setComposeError(null);
+    setComposeSuccess(null);
+    try {
+      const m = await api<MailMessageDto>("/mail/messages", {
+        method: "POST",
+        body: JSON.stringify({
+          accountId: composeFrom || undefined,
+          to,
+          subject: composeSubject.trim(),
+          body: composeBody,
+          draft,
+        }),
+      });
+      setFolder(draft ? "drafts" : "sent");
+      setSelectedId(m.id);
+      setNotice(`✓ ${draft ? "草稿已保存" : "已通过 SMTP 发送"} · ${m.subject}`);
+      setComposeSuccess(
+        draft
+          ? `✓ 草稿已保存 · ${m.subject}`
+          : `✓ 已通过 SMTP 发送 · ${m.subject}`,
+      );
+      await Promise.all([loadMessages(draft ? "drafts" : "sent"), reloadSummary()]);
+    } catch (e) {
+      setComposeError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setComposeBusy(false);
     }
   };
 
@@ -536,8 +644,9 @@ export default function MailPanel() {
             </button>
             <button
               className="rounded border border-line px-2 py-0.5 text-tx2 hover:border-acc hover:text-acc disabled:opacity-40"
-              onClick={() => setCmd("mail.compose ")}
-              disabled={busy}
+              onClick={() => openCompose()}
+              disabled={busy || accounts.length === 0}
+              title={accounts.length === 0 ? "请先在「邮箱账户」注入一个邮箱" : "可视化写信 · 选择发件邮箱"}
             >
               写邮件
             </button>
@@ -558,6 +667,127 @@ export default function MailPanel() {
           </div>
         )}
       </div>
+
+      {/* 写邮件弹窗：可视化 compose，发件邮箱可选 */}
+      {canWrite && composeOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setComposeOpen(false);
+          }}
+        >
+          <div className="max-h-[90vh] w-[min(680px,96%)] overflow-y-auto rounded-lg border border-line bg-bg1 shadow-2xl">
+            <div className="flex items-center gap-2 border-b border-line px-4 py-2.5 text-[11px]">
+              <span className="text-acc">▸</span>
+              <span className="text-tx2">mail.compose</span>
+              <span className="text-tx3">// 选择发件邮箱 · SMTP 发送</span>
+              <button
+                className="ml-auto rounded border border-line px-1.5 py-0.5 text-[10px] text-tx3 hover:border-err hover:text-err"
+                onClick={() => setComposeOpen(false)}
+                title="关闭"
+              >
+                ✕
+              </button>
+            </div>
+
+            {accounts.length === 0 ? (
+              <div className="px-4 py-10 text-center text-[11px] text-tx3">
+                // 尚未注入邮箱账户
+                <br />
+                // 先在「邮箱账户」添加一个（需开通 IMAP / SMTP）
+              </div>
+            ) : (
+              <>
+                <div className="space-y-3 px-4 py-3 text-[11.5px]">
+                  <label className={accRow}>
+                    <span className={accLab}>from:</span>
+                    <select
+                      className={accField}
+                      value={composeFrom}
+                      onChange={(e) => setComposeFrom(e.target.value)}
+                    >
+                      {accounts.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.name} &lt;{a.address}&gt;{a.status === "error" ? " · 连接异常" : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className={accRow}>
+                    <span className={accLab}>to:</span>
+                    <input
+                      className={accField}
+                      placeholder="alice@example.com"
+                      value={composeTo}
+                      onChange={(e) => {
+                        setComposeTo(e.target.value);
+                        setComposeError(null);
+                      }}
+                      autoFocus
+                    />
+                  </label>
+                  <label className={accRow}>
+                    <span className={accLab}>subject:</span>
+                    <input
+                      className={accField}
+                      placeholder="周报确认"
+                      value={composeSubject}
+                      onChange={(e) => {
+                        setComposeSubject(e.target.value);
+                        setComposeError(null);
+                      }}
+                    />
+                  </label>
+                  <div>
+                    <div className="mb-1 text-tx3">body:</div>
+                    <textarea
+                      className="h-56 w-full resize-y rounded border border-line bg-bg px-2 py-1.5 font-mono text-[11.5px] text-tx outline-none placeholder:text-tx3 focus:border-acc"
+                      placeholder="正文…"
+                      value={composeBody}
+                      onChange={(e) => setComposeBody(e.target.value)}
+                    />
+                  </div>
+                  {composeError && <div className="text-[11px] text-err">✗ {composeError}</div>}
+                  {(() => {
+                    const a = accounts.find((x) => x.id === composeFrom);
+                    return a ? (
+                      <div className="text-[10px] text-tx3">
+                        // 将通过 {a.smtpHost}:{a.smtpPort} 发送
+                      </div>
+                    ) : null;
+                  })()}
+                </div>
+                {composeSuccess ? (
+                  <div className="flex items-center gap-2 border-t border-acc/40 bg-acc/10 px-4 py-3 text-[11.5px] text-acc">
+                    <span>{composeSuccess}</span>
+                    <span className="ml-auto animate-pulse text-[10px] text-tx3">即将关闭…</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 border-t border-line px-4 py-2.5 text-[11px]">
+                    <span className="text-[10px] text-tx3">esc 关闭</span>
+                    <div className="ml-auto flex gap-2">
+                      <button
+                        className="rounded border border-line px-2.5 py-1 text-[11px] text-tx2 hover:border-acc hover:text-acc disabled:opacity-40"
+                        onClick={() => void submitCompose(true)}
+                        disabled={composeBusy}
+                      >
+                        存草稿
+                      </button>
+                      <button
+                        className="rounded border border-acc/60 bg-acc/10 px-2.5 py-1 text-[11px] text-acc hover:bg-acc/20 disabled:opacity-40"
+                        onClick={() => void submitCompose(false)}
+                        disabled={composeBusy}
+                      >
+                        {composeBusy ? "⠋ 发送中" : "⏎ 发送"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* 邮箱账户注入弹窗 */}
       {canWrite && accountOpen && (
@@ -936,7 +1166,7 @@ export default function MailPanel() {
                 return (
                   <div
                     key={m.id}
-                    className={`grid cursor-pointer grid-cols-[44px_120px_minmax(0,1fr)_auto] items-baseline gap-2.5 border-b border-line px-2.5 py-2.5 transition-colors ${
+                    className={`grid cursor-pointer grid-cols-[38px_84px_minmax(0,1fr)_auto] items-baseline gap-2 border-b border-line px-2.5 py-2.5 transition-colors sm:grid-cols-[44px_120px_minmax(0,1fr)_auto] sm:gap-2.5 ${
                       on ? "bg-bg2" : "hover:bg-bg2"
                     }`}
                     onClick={() => void openMessage(m)}
@@ -969,10 +1199,29 @@ export default function MailPanel() {
           </div>
         </div>
 
-        {/* 阅读窗 */}
-        <div className="min-w-0 overflow-hidden rounded-lg border border-line bg-bg1">
+        {/* 阅读窗：桌面端为右栏；移动端选中邮件时全屏覆盖（含 ← 返回），未选中时不占位 */}
+        <div
+          className={`min-w-0 overflow-hidden rounded-lg border border-line bg-bg1 ${
+            selected
+              ? "fixed inset-0 z-30 flex flex-col rounded-none lg:static lg:z-auto lg:rounded-lg"
+              : "hidden lg:block"
+          }`}
+        >
           <div className="flex items-center justify-between border-b border-line px-3 py-1.5 text-[10.5px] text-tx3">
-            <span>~/mail/{selected ? "message" : "reader"}</span>
+            <span className="flex items-center gap-2">
+              {selected && (
+                <button
+                  className="flex items-center gap-1 rounded border border-line px-1.5 py-[1px] text-[10px] text-tx2 hover:border-acc hover:text-acc lg:hidden"
+                  onClick={() => {
+                    setSelectedId(null);
+                    setReplyBody("");
+                  }}
+                >
+                  ← 返回
+                </button>
+              )}
+              <span>~/mail/{selected ? "message" : "reader"}</span>
+            </span>
             {selected && (
               <button
                 className="text-tx3 hover:text-err"
@@ -992,7 +1241,7 @@ export default function MailPanel() {
               // 或输入 mail.compose 写一封
             </div>
           ) : (
-            <div className="max-h-[560px] overflow-y-auto p-3.5">
+            <div className="min-h-0 flex-1 overflow-y-auto p-3.5 lg:max-h-[560px]">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
                   <div className="break-words text-[14px] text-tx">{selected.subject}</div>
@@ -1011,9 +1260,99 @@ export default function MailPanel() {
                 AI: {selected.aiReason}
               </div>
 
-              <div className="mt-3 whitespace-pre-wrap break-words text-[12.5px] leading-relaxed text-tx2">
-                {selected.body || "（无正文）"}
-              </div>
+              {selected.bodyHtml ? (
+                <div className="mt-3">
+                  <div className="mb-1.5 flex items-center gap-1.5 text-[10px]">
+                    <button
+                      className={`rounded border px-1.5 py-0.5 ${
+                        bodyMode === "html" ? "border-acc text-acc" : "border-line text-tx3 hover:border-acc"
+                      }`}
+                      onClick={() => setBodyMode("html")}
+                    >
+                      HTML
+                    </button>
+                    <button
+                      className={`rounded border px-1.5 py-0.5 ${
+                        bodyMode === "text" ? "border-acc text-acc" : "border-line text-tx3 hover:border-acc"
+                      }`}
+                      onClick={() => setBodyMode("text")}
+                    >
+                      纯文本
+                    </button>
+                    <span className="ml-1 text-[9.5px] text-tx3">
+                      // 外部图片与资源已屏蔽
+                    </span>
+                  </div>
+                  {bodyMode === "html" ? (
+                    <HtmlMailBody html={selected.bodyHtml} />
+                  ) : (
+                    <div className="whitespace-pre-wrap break-words text-[12.5px] leading-relaxed text-tx2">
+                      {selected.body || "（无正文）"}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="mt-3 whitespace-pre-wrap break-words text-[12.5px] leading-relaxed text-tx2">
+                  {selected.body || "（无正文）"}
+                </div>
+              )}
+
+              {(() => {
+                const files = selected.attachments.filter((a) => !a.inline);
+                if (!files.length) return null;
+                return (
+                  <div className="mt-3 rounded border border-line bg-bg1 p-2">
+                    <div className="mb-1.5 text-[10px] text-tx3">📎 附件 · {files.length}</div>
+                    <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+                      {files.map((a) => {
+                        const kind = attachmentKind(a.contentType, a.filename);
+                        const isImage = a.contentType.toLowerCase().startsWith("image/");
+                        return (
+                          <div
+                            key={a.index}
+                            className="flex items-center gap-2 rounded border border-line px-2 py-1.5"
+                          >
+                            <div
+                              className={`flex h-9 w-9 flex-none items-center justify-center rounded border text-[9px] ${kind.cls}`}
+                              style={
+                                isImage
+                                  ? {
+                                      backgroundImage:
+                                        "repeating-conic-gradient(rgba(255,255,255,.12) 0% 25%, transparent 0% 50%)",
+                                      backgroundSize: "10px 10px",
+                                    }
+                                  : undefined
+                              }
+                              title={a.contentType}
+                            >
+                              {kind.label}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="truncate text-[11px] text-tx2" title={a.filename}>
+                                {a.filename}
+                              </div>
+                              <div className="text-[9.5px] text-tx3">
+                                {formatBytes(a.size)}
+                                {!a.available && " · 内容未落盘"}
+                              </div>
+                            </div>
+                            {a.available && (
+                              <button
+                                className="flex-none rounded border border-line px-1.5 py-0.5 text-[10px] text-tx2 hover:border-acc hover:text-acc disabled:opacity-40"
+                                onClick={() => void downloadAttachment(selected, a)}
+                                disabled={downloadBusy !== null}
+                                title="下载附件"
+                              >
+                                {downloadBusy === a.index ? "⠋" : "↓"}
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {canWrite && (
                 <div className="mt-4 flex flex-wrap items-center gap-1.5 border-t border-line pt-2 text-[10px]">
@@ -1090,5 +1429,58 @@ export default function MailPanel() {
         // 多邮箱聚合 · AI 分类（important / subscription / spam / normal） · IMAP 收件 / SMTP 发件
       </div>
     </div>
+  );
+}
+
+/** 附件类型 → 角标文字与配色（无独立图片资源，用纯文本 + 边框区分） */
+function attachmentKind(contentType: string, filename: string): { label: string; cls: string } {
+  const ct = contentType.toLowerCase();
+  if (ct.startsWith("image/")) return { label: "IMG", cls: "border-acc/40 text-acc" };
+  if (ct === "application/pdf") return { label: "PDF", cls: "border-err/50 text-err" };
+  if (ct.startsWith("video/")) return { label: "VID", cls: "border-line text-tx2" };
+  if (ct.startsWith("audio/")) return { label: "AUD", cls: "border-line text-tx2" };
+  if (/zip|rar|7z|tar|gzip|compressed/.test(ct) || /\.(zip|rar|7z|tar|gz)$/i.test(filename)) {
+    return { label: "ZIP", cls: "border-line text-tx2" };
+  }
+  if (/sheet|excel|csv/.test(ct)) return { label: "XLS", cls: "border-line text-tx2" };
+  if (/word|document|text/.test(ct)) return { label: "DOC", cls: "border-line text-tx2" };
+  return { label: "FILE", cls: "border-line text-tx3" };
+}
+
+function formatBytes(size: number): string {
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / 1024 / 1024).toFixed(1)} MB`;
+}
+
+/** 把邮件 HTML 装进沙箱：去脚本/外链，外部图片换占位，CSP 只允许 inline 样式与 data: 图 */
+function prepareMailHtml(raw: string): string {
+  const cleaned = raw
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<script[^>]*>/gi, "")
+    .replace(/<link[^>]*>/gi, "");
+  const body = cleaned.replace(/<img\b[^>]*>/gi, (tag) =>
+    /src\s*=\s*["']data:/i.test(tag)
+      ? tag
+      : '<div class="__ph">🖼 图片占位 · 外部图片已屏蔽</div>',
+  );
+  return `<!doctype html><html><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:;">
+<style>
+html,body{margin:0;padding:12px;font:13px/1.65 -apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-serif;color:#1f2328;background:#fff;word-break:break-word}
+img{max-width:100%;height:auto}table{max-width:100%;border-collapse:collapse}
+.__ph{display:flex;align-items:center;justify-content:center;min-height:72px;margin:8px 0;border:1px dashed #c9ced6;border-radius:6px;color:#8b949e;font-size:12px;background:repeating-linear-gradient(45deg,#f6f8fa,#f6f8fa 8px,#eef1f4 8px,#eef1f4 16px)}
+</style></head><body>${body}</body></html>`;
+}
+
+function HtmlMailBody({ html }: { html: string }) {
+  const srcDoc = useMemo(() => prepareMailHtml(html), [html]);
+  return (
+    <iframe
+      title="邮件 HTML 正文"
+      sandbox=""
+      srcDoc={srcDoc}
+      className="h-[420px] w-full rounded border border-line bg-white"
+    />
   );
 }

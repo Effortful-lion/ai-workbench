@@ -79,26 +79,33 @@ export default function HeroState() {
     }
   };
 
-  const chips: { label: string; run: () => void }[] = [
-    { label: "▸ 打开模型管理", run: () => openPanel("models") },
-    { label: "▸ 打开 AI 助手", run: () => openPanel("agents") },
-    { label: "▸ 打开执行历史", run: () => openPanel("history") },
-    { label: "▸ 打开访问统计", run: () => openPanel("stats") },
-    { label: "▸ 打开知识库", run: () => openPanel("kb") },
-    { label: "▸ 打开项目管理", run: () => openPanel("projects") },
-    { label: "▸ 打开代码管理", run: () => openPanel("code") },
-    { label: "▸ 打开日程管理", run: () => openPanel("cal") },
-    { label: "▸ 打开邮件管理", run: () => openPanel("mail") },
-    { label: "▸ 打开站内信", run: () => openPanel("notify") },
-    { label: "▸ 打开商业化管理", run: () => openPanel("biz") },
-    { label: "▸ 打开客户管理", run: () => openPanel("crm") },
-    { label: "▸ 打开流水线工厂", run: () => openPanel("pipe") },
-    { label: "▸ 打开个人简历", run: () => openPanel("resume") },
-    { label: "▸ 打开百宝箱", run: () => openPanel("tools") },
-    { label: "▸ 打开工具管理", run: () => openPanel("aitools") },
-    { label: "▸ 进入 CLI", run: () => setCli(true) },
-    { label: "▸ 你能做什么？", run: () => send("你能做什么？") },
-    { label: "▸ 介绍一下这个工作台", run: () => send("介绍一下这个工作台") },
+  const entries: { label: string; run: () => void }[] = [
+    { label: "模型管理", run: () => openPanel("models") },
+    { label: "AI 助手", run: () => openPanel("agents") },
+    { label: "执行历史", run: () => openPanel("history") },
+    { label: "访问统计", run: () => openPanel("stats") },
+    { label: "知识库", run: () => openPanel("kb") },
+    { label: "项目管理", run: () => openPanel("projects") },
+    { label: "代码管理", run: () => openPanel("code") },
+    { label: "日程管理", run: () => openPanel("cal") },
+    { label: "邮件管理", run: () => openPanel("mail") },
+    { label: "站内信", run: () => openPanel("notify") },
+    { label: "商业化管理", run: () => openPanel("biz") },
+    { label: "客户管理", run: () => openPanel("crm") },
+    { label: "流水线工厂", run: () => openPanel("pipe") },
+    { label: "个人简历", run: () => openPanel("resume") },
+    { label: "百宝箱", run: () => openPanel("tools") },
+    { label: "工具管理", run: () => openPanel("aitools") },
+    { label: "GitHub 观察窗", run: () => openPanel("gh") },
+    { label: "CLI 终端", run: () => setCli(true) },
+  ];
+
+  /** MinIO Web 控制台入口：按当前 host 推导（端口 9701），让用户知道工作台自带对象存储 */
+  const minioConsoleUrl = `${window.location.protocol}//${window.location.hostname}:9701`;
+
+  const questions: { label: string; run: () => void }[] = [
+    { label: "你能做什么？", run: () => send("你能做什么？") },
+    { label: "介绍一下这个工作台", run: () => send("介绍一下这个工作台") },
   ];
 
   return (
@@ -136,16 +143,46 @@ export default function HeroState() {
         </div>
       </form>
 
-      <div className="flex flex-wrap justify-center gap-2">
-        {chips.map((c) => (
-          <button
-            key={c.label}
-            className="rounded border border-line bg-bg1 px-3 py-1.5 font-mono text-[12px] text-tx2 transition-colors hover:border-acc hover:text-acc"
-            onClick={c.run}
-          >
-            {c.label}
-          </button>
-        ))}
+      {/* 两组快捷区：入口（开模块/外部服务）与问题（问 AI） */}
+      <div className="w-[min(720px,100%)] space-y-5">
+        <section>
+          <h2 className="mb-2.5 font-mono text-[11px] text-tx3">// 快捷入口</h2>
+          <div className="flex flex-wrap gap-2">
+            {entries.map((c) => (
+              <button
+                key={c.label}
+                className="rounded border border-line bg-bg1 px-3 py-1.5 font-mono text-[12px] text-tx2 transition-colors hover:border-acc hover:text-acc"
+                onClick={c.run}
+              >
+                {c.label}
+              </button>
+            ))}
+            <a
+              href={minioConsoleUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded border border-acc/40 bg-bg1 px-3 py-1.5 font-mono text-[12px] text-acc transition-colors hover:border-acc hover:bg-acc/10"
+              title={`打开对象存储控制台（${minioConsoleUrl}，账号与网站管理员一致）`}
+            >
+              ↗ 对象存储
+            </a>
+          </div>
+        </section>
+
+        <section>
+          <h2 className="mb-2.5 font-mono text-[11px] text-tx3">// 猜你想问</h2>
+          <div className="flex flex-wrap gap-2">
+            {questions.map((c) => (
+              <button
+                key={c.label}
+                className="rounded border border-line bg-bg1 px-3 py-1.5 font-mono text-[12px] text-tx2 transition-colors hover:border-acc hover:text-acc"
+                onClick={c.run}
+              >
+                {c.label}
+              </button>
+            ))}
+          </div>
+        </section>
       </div>
     </div>
   );

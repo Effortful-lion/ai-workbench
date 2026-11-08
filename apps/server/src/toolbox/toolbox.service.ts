@@ -1,12 +1,15 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { and, desc, eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { rm } from "node:fs/promises";
+import { createReadStream, existsSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import type { Readable } from "node:stream";
 import type { ToolboxItemDto, ToolboxItemInput } from "@aiwb/shared";
 import { mimeOfFileName } from "@aiwb/shared";
 import { DB, type Db } from "../db/db.module";
 import { toolboxItems, users } from "../db/schema";
+import { StorageService } from "../storage/storage.service";
 
 const MAX_URL = 500;
 const MAX_NAME = 40;
@@ -15,7 +18,8 @@ const MAX_DESC = 200;
 /** 上传体积上限：50MB，覆盖常规安装包 / 压缩包 / 技能包 */
 export const MAX_TOOLBOX_FILE_BYTES = 50 * 1024 * 1024;
 
-/** workspace root — __dirname = dist/toolbox，往上 4 级；文件落在 data/toolbox */
+/** workspace root — __dirname = dist/toolbox，往上 4 级。
+ *  遗留本地文件目录：迁移期兜底读取用；新文件一律写 MinIO（BUCKETS.files） */
 const TOOLBOX_DIR = join(resolve(__dirname, "../../../../data"), "toolbox");
 
 /** multer 内存存储的文件对象（不引入 @types/multer，按需结构声明） */
@@ -81,7 +85,10 @@ function normalizeCategory(raw: unknown): string {
 
 @Injectable()
 export class ToolboxService {
-  constructor(@Inject(DB) private readonly db: Db) {}
+  constructor(
+    @Inject(DB) private readonly db: Db,
+    private readonly storage: StorageService,
+  ) {}
 
   private toDto(row: typeof toolboxItems.$inferSelect): ToolboxItemDto {
     return {
@@ -145,7 +152,8 @@ export class ToolboxService {
     return this.toDto(row);
   }
 
-  /** 文件类工具：二进制 / 安装包 / 压缩包 / 技能包，落盘到 data/toolbox/<id>/ */
+  /** 文件类工具：二进制 / 安装包 / 压缩包 / 技能包，存 MinIO（BUCKETS.files）。
+   *  storagePath 列沿用 <id>/<fileName>，同时就是 MinIO object key，无需 schema 变更 */
   async createFile(
     userId: string,
     input: FileToolInput,
@@ -160,8 +168,11 @@ export class ToolboxService {
     const fileName = safeFileName(file.originalname ?? "file");
     const id = randomUUID();
     const storagePath = `${id}/${fileName}`;
-    await mkdir(join(TOOLBOX_DIR, id), { recursive: true });
-    await writeFile(join(TOOLBOX_DIR, storagePath), buf);
+    const mimeType =
+      file.mimetype && file.mimetype !== "application/octet-stream"
+        ? file.mimetype.slice(0, 100)
+        : mimeOfFileName(fileName);
+    await this.storage.putObject("files", storagePath, buf, mimeType);
 
     const name = text(input?.name, MAX_NAME) || deriveNameFromFile(fileName);
     const category = normalizeCategory(input?.category);
@@ -175,10 +186,7 @@ export class ToolboxService {
       url: `/api/toolbox/files/${id}`,
       fileName,
       fileSize: buf.length,
-      mimeType:
-        file.mimetype && file.mimetype !== "application/octet-stream"
-          ? file.mimetype.slice(0, 100)
-          : mimeOfFileName(fileName),
+      mimeType,
       storagePath,
       category,
       desc,
@@ -189,25 +197,31 @@ export class ToolboxService {
     return this.toDto(row);
   }
 
-  /** 下载信息：文件类工具才能取，路径必须仍在 data/toolbox 内 */
+  /** 下载流：文件类工具才能取。优先 MinIO；迁移前遗留的本地文件兜底 */
   async fileFor(
     id: string,
-  ): Promise<{ path: string; fileName: string; mimeType: string; size: number }> {
+  ): Promise<{ stream: Readable; fileName: string; mimeType: string; size: number }> {
     const [row] = await this.db.select().from(toolboxItems).where(eq(toolboxItems.id, id));
     if (!row || row.kind !== "file" || !row.storagePath) {
       throw new NotFoundException("文件不存在");
     }
-    const abs = resolve(TOOLBOX_DIR, row.storagePath);
-    const rel = relative(TOOLBOX_DIR, abs);
-    if (!rel || rel.startsWith("..") || isAbsolute(rel)) {
-      throw new NotFoundException("文件不存在");
-    }
-    return {
-      path: abs,
+    const meta = {
       fileName: row.fileName || "file",
       mimeType: row.mimeType || "application/octet-stream",
       size: row.fileSize,
     };
+    try {
+      const { stream } = await this.storage.getObjectStream("files", row.storagePath);
+      return { stream, ...meta };
+    } catch {
+      // 遗留本地文件（未跑迁移脚本的老数据）
+      const abs = resolve(TOOLBOX_DIR, row.storagePath);
+      const rel = relative(TOOLBOX_DIR, abs);
+      if (rel.startsWith("..") || isAbsolute(rel) || !existsSync(abs)) {
+        throw new NotFoundException("文件不存在");
+      }
+      return { stream: createReadStream(abs), ...meta };
+    }
   }
 
   async remove(id: string, userId: string) {
@@ -219,6 +233,8 @@ export class ToolboxService {
     const row = rows[0];
     await this.db.delete(toolboxItems).where(eq(toolboxItems.id, id));
     if (row.storagePath) {
+      // MinIO 对象与遗留本地目录都清一遍（迁移期两种都可能存在）
+      await this.storage.removeObject("files", row.storagePath).catch(() => {});
       const absDir = dirname(resolve(TOOLBOX_DIR, row.storagePath));
       await rm(absDir, { recursive: true, force: true }).catch(() => {
         /* 文件已不在，忽略 */
