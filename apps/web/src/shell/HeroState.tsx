@@ -5,6 +5,7 @@ import { useAuthStore } from "../stores/auth";
 import { useChatStore } from "../stores/chat";
 import { usePanelStore } from "../stores/panel";
 import { useUiStore } from "../stores/ui";
+import { useConfirmStore } from "../stores/confirm";
 import CommandSuggest from "./CommandSuggest";
 import ModelPicker from "./ModelPicker";
 import type { Command } from "../lib/commands";
@@ -76,8 +77,15 @@ export default function HeroState() {
           send("你能做什么？");
           break;
         case "logout":
-          disconnect();
-          logout();
+          useConfirmStore.getState().ask({
+            title: "退出登录",
+            message: "确定要退出当前账号吗？",
+            confirmText: "⏎ 退出",
+            onConfirm: () => {
+              disconnect();
+              logout();
+            },
+          });
           break;
       }
     }
@@ -113,7 +121,9 @@ export default function HeroState() {
   ];
 
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-8 px-6">
+    // 外层负责滚动：横屏（视口矮）内容超出一屏时可上下滚动；内层 min-h-full 保证内容短时仍垂直居中
+    <div className="h-full overflow-y-auto px-6">
+      <div className="mx-auto flex min-h-full w-[min(720px,100%)] flex-col items-center justify-center gap-6 py-6 landscape:gap-8">
       <div className="text-center">
         <div className="font-mono text-[13px] text-tx3">
           {new Date().toLocaleDateString("zh-CN", { month: "long", day: "numeric", weekday: "long" })}
@@ -194,6 +204,8 @@ export default function HeroState() {
           </div>
         </section>
       </div>
+      </div>
     </div>
   );
 }
+

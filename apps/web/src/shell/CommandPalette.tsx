@@ -3,6 +3,7 @@ import { useAuthStore } from "../stores/auth";
 import { useChatStore } from "../stores/chat";
 import { PANEL_META, usePanelStore, type PanelId } from "../stores/panel";
 import { useUiStore } from "../stores/ui";
+import { useConfirmStore } from "../stores/confirm";
 
 interface Cmd {
   kind: "导航" | "动作" | "AI";
@@ -48,11 +49,17 @@ export default function CommandPalette() {
         kind: "动作",
         label: "退出登录",
         keywords: "logout quit",
-        run: () => {
-          disconnect();
-          closeAll();
-          clearAuth();
-        },
+        run: () =>
+          useConfirmStore.getState().ask({
+            title: "退出登录",
+            message: "确定要退出当前账号吗？",
+            confirmText: "⏎ 退出",
+            onConfirm: () => {
+              disconnect();
+              closeAll();
+              clearAuth();
+            },
+          }),
       },
     ];
     return [...nav, ...actions];

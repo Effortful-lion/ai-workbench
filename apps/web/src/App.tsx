@@ -11,6 +11,7 @@ import ChatColumn from "./shell/ChatColumn";
 import PanelZone from "./shell/PanelZone";
 import CommandPalette from "./shell/CommandPalette";
 import CliOverlay from "./shell/CliOverlay";
+import ConfirmDialog from "./shell/ConfirmDialog";
 import ToastHost from "./shell/ToastHost";
 import PublicResumePage from "./features/resume/PublicResumePage";
 import PublicToolboxPage from "./features/tools/PublicToolboxPage";
@@ -117,6 +118,8 @@ export default function App() {
         )}
       </main>
       <StatusBar mode={mode} />
+      {/* 全局二次确认弹窗（退出登录/删除等，替代 window.confirm） */}
+      <ConfirmDialog />
       <CommandPalette />
       <ToastHost />
     </div>

@@ -12,6 +12,7 @@ import { useChatStore } from "../stores/chat";
 import { usePanelStore } from "../stores/panel";
 import { useUiStore } from "../stores/ui";
 import { useToastStore } from "../stores/toast";
+import { useConfirmStore } from "../stores/confirm";
 import { api } from "../lib/api";
 
 const CONTACT_LABEL: Record<ContactChannelType, string> = {
@@ -184,7 +185,14 @@ export default function TopBar() {
         </span>
         <button
           className="flex h-[26px] items-center justify-center rounded border border-line px-2 py-1 hover:border-err hover:text-err"
-          onClick={logout}
+          onClick={() =>
+            useConfirmStore.getState().ask({
+              title: "退出登录",
+              message: `确定要退出当前账号（${user?.username ?? ""}）吗？`,
+              confirmText: "⏎ 退出",
+              onConfirm: () => void logout(),
+            })
+          }
           title="退出登录"
         >
           ✗
