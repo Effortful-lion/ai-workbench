@@ -8,6 +8,8 @@ import { api } from "../lib/api";
 import { MarkdownText } from "../lib/markdown";
 import type { ModelDto } from "@aiwb/shared";
 import CommandSuggest from "./CommandSuggest";
+import ModelPicker from "./ModelPicker";
+import PickerChip from "./PickerChip";
 import TracePanel from "../features/chat/TracePanel";
 import { ToolCallBlock, groupMessages, type RenderGroup } from "../features/chat/ToolCallBlock";
 import type { Command } from "../lib/commands";
@@ -91,25 +93,9 @@ export default function ChatColumn() {
       {/* 栏头 */}
       <div className="flex h-[38px] flex-none items-center gap-2 border-b border-line px-3 font-mono text-[11px] text-tx3">
         <span className="flex-none">~/chat</span>
-        {/* 模型选择器：切换对话模型（长名截断，状态灯紧贴其右） */}
+        {/* 选择器组：模型 / Agent，统一终端风 PickerChip（与主页 Hero 芯片同源联动） */}
         <div className="flex min-w-0 flex-1 items-center gap-1.5">
-          <select
-            className="min-w-0 cursor-pointer truncate rounded border border-line bg-bg1 px-1 py-0.5 text-[10px] text-tx2 outline-none hover:border-acc focus:border-acc"
-            style={{ maxWidth: 220 }}
-            value={pendingModelId ?? ""}
-            onChange={(e) => setModel(e.target.value || null)}
-            title="选择对话模型（不选则用默认模型，切换后下一条消息生效）"
-          >
-            <option value="">
-              ◎ 自动（{models.find((m) => m.isDefault)?.modelName ?? "服务端挑选"}）
-            </option>
-            {models.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.provider}/{m.modelName}
-                {m.isDefault ? " ★" : ""}
-              </option>
-            ))}
-          </select>
+          <ModelPicker value={pendingModelId} onChange={setModel} align="left" chipClass="max-w-[220px]" />
           {pendingModelId && (() => {
             const m = models.find((x) => x.id === pendingModelId);
             if (!m) return null;
@@ -120,21 +106,19 @@ export default function ChatColumn() {
               />
             );
           })()}
-          {/* Agent 选择器 */}
-          <select
-            className="min-w-0 flex-none cursor-pointer truncate rounded border border-line bg-bg1 px-1 py-0.5 text-[10px] text-tx2 outline-none hover:border-acc focus:border-acc"
-            style={{ maxWidth: 120 }}
-            value={currentAgentId ?? ""}
-            onChange={(e) => startAgentChat(e.target.value || null)}
+          {/* Agent 选择器：切换后开启新会话 */}
+          <PickerChip
+            align="left"
+            head="◐ 选择 Agent"
+            chipClass="max-w-[130px]"
+            value={currentAgentId}
+            onChange={(id) => startAgentChat(id)}
             title="选择 Agent（切换后开启新会话）"
-          >
-            <option value="">◐ 通用助手</option>
-            {agents.map((a) => (
-              <option key={a.id} value={a.id}>
-                ◑ {a.name}
-              </option>
-            ))}
-          </select>
+            items={[
+              { id: null, name: "通用助手" },
+              ...agents.map((a) => ({ id: a.id, name: a.name })),
+            ]}
+          />
         </div>
         {/* 右侧：固定宽度，不参与挤占 */}
         <div className="flex flex-none items-center gap-1.5">

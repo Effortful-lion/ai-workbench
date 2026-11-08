@@ -671,9 +671,14 @@ export default function KbPanel() {
                 <span className="text-tx3">
                   {mode === "quick" ? "单点事实 / 原文定位" : "跨文档归纳 / 多跳推理"}
                 </span>
-                {/* 生成模型芯片：◎ 自动=服务端默认；LightRAG 链路不受影响 */}
+                {/* 生成模型芯片：◎ 自动=服务端默认；向上展开（贴底输入区不遮挡）；LightRAG 链路不受影响 */}
                 <div className="ml-auto">
-                  <ModelPicker value={kbModelId ?? null} onChange={setKbModelId} align="right" />
+                  <ModelPicker
+                    value={kbModelId ?? null}
+                    onChange={(id) => setKbModelId(id ?? undefined)}
+                    align="right"
+                    direction="up"
+                  />
                 </div>
               </div>
               <div className="flex items-center gap-2 rounded-lg border border-line bg-bg px-3 py-2.5 focus-within:border-acc">
