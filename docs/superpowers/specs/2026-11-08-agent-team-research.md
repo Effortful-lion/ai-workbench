@@ -63,3 +63,31 @@
 - 用户频繁手动串联多个 agent/pipe 完成同一复杂任务（编排需求真实出现）
 - 出现需要隔离上下文的长链路工具任务（主对话被工具输出撑爆）
 - 多用户/团队版上线，出现跨 agent 协作的真实场景
+
+## 6. 生态参照：OpenMausBot（2026-11 调研补录）
+
+`github.com/milind-soni/OpenMausBot`——开源 Grok Bot 平替，GitHub 日榜第一（9k+ star，高频发版）。
+
+- **形态**：Electron 桌面应用（React 19 + TS + Vite + Tailwind，Node 24+，本地端口 5199），聊天联系人式 bot 列表
+- **引擎**：本地 CLI 驱动 Claude Code / Codex / Grok，另支持自定义 ACP（Agent Client Protocol）或 OpenAI 兼容引擎
+- **卖点**：给 bot 配虚拟机沙箱（跑代码→看输出→自我纠错的执行闭环）；数据全本地 `~/.openmausbot`
+- **嵌入结论**：❌ 整装嵌入不可行（Electron 桌面端 vs 我们的 Web 架构；CLI 驱动 vs 我们的 API+ToolRegistry 双轨不通）；✅ 可借鉴：bot 即联系人（我们 agents 已对应）、每 bot 独立模型/指令/工作目录、ACP 可插拔引擎；✅ 最有价值的移植：「CLI 代理做成新模型 provider（kind=cli，adapter shell 调 `claude -p` / `codex exec`）」，上层 chat/KB/phase 自动获得编码代理能力，不引入其壳
+
+## 7. 场景锚点：量化交易类复杂任务与实现难度评估
+
+目标场景：涉及**决策、条件分支、多步比较**的复杂任务（量化交易 = 数据抓取 → 策略生成 → 回测执行 → 结果分析比较 → 决策输出）。
+
+| 能力块 | 现状 | 难度 | 说明 |
+|---|---|---|---|
+| 数据抓取工具 | custom-tools 已支持注册自定义 HTTP 工具 | ★☆☆ | 配置即可，无需开发 |
+| 编排（条件/决策） | phase 仅线性顺序 | ★★☆ | phase 条件路由 + `agent.spawn` 动态派发，预算/迹线接口已预留 |
+| 代码执行（回测） | **无沙箱** | ★★★ | 最大缺口；需容器/VM 沙箱跑 Python（OpenMausBot 的核心卖点即此）；非沙箱本地 python 工具可先做演示版但不可对外 |
+| 长任务持久化 | pipeRuns/pipeRunSteps 有断点重试雏形 | ★★☆ | 抽象为通用 task/job 表，复用 pipe 引擎 |
+| 定时调度 | SOP schedule 字段空壳 | ★★☆ | 接 cron/调度器即可 |
+| 结果比较与决策输出 | 无 | ★☆☆ | prompt/结构化输出层面解决 |
+
+**分级结论**：
+- **演示级**（本地 python 工具 + 抓取工具 + pipe 串联，人工触发）：1-2 天，验证链路
+- **可用级**（agent.spawn + phase 条件路由 + 通用任务表 + cron）：1-2 个迭代
+- **生产级**（沙箱执行环境 + 风控/预算硬熔断 + 数据源管理）：周级，沙箱是主要成本
+- 依赖关系：沙箱执行环境是量化场景的硬前提，建议与「CLI provider」一样作为未来 Agent Team 重启时的并列选项评估
