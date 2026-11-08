@@ -1,7 +1,9 @@
 import {
-  BadRequestException, Body, Controller, Delete, Get, Param, Post, Query, UseGuards,
+  BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards,
 } from "@nestjs/common";
-import type { KbAskInput, KbIngestInput } from "@aiwb/shared";
+import type {
+  KbAskInput, KbCreateFolderInput, KbIngestInput, KbLinkInput, KbSearchInput, KbUpdateFolderInput,
+} from "@aiwb/shared";
 import { JwtAuthGuard, CurrentUser, type AuthUser } from "../auth/jwt-auth.guard";
 import { PermissionGuard, RequirePerm } from "../common/permission.guard";
 import { KbService } from "./kb.service";
@@ -51,11 +53,69 @@ export class KbController {
     }
   }
 
+  // ---- 目录树（视图层）----
+
+  @Get("folders")
+  @RequirePerm("kb:read")
+  listFolders(@CurrentUser() user: AuthUser) {
+    return this.svc.listFolders(user.id);
+  }
+
+  @Post("folders")
+  @RequirePerm("kb:write")
+  async createFolder(@CurrentUser() user: AuthUser, @Body() body: KbCreateFolderInput) {
+    try {
+      return await this.svc.createFolder(user.id, body);
+    } catch (e) {
+      throw new BadRequestException((e as Error).message);
+    }
+  }
+
+  @Patch("folders/:id")
+  @RequirePerm("kb:write")
+  async updateFolder(
+    @Param("id") id: string,
+    @CurrentUser() user: AuthUser,
+    @Body() body: KbUpdateFolderInput,
+  ) {
+    try {
+      return await this.svc.updateFolder(user.id, id, body);
+    } catch (e) {
+      throw new BadRequestException((e as Error).message);
+    }
+  }
+
+  /** 删除目录仅删视图与映射；文档本体、向量切片保留 */
+  @Delete("folders/:id")
+  @RequirePerm("kb:write")
+  deleteFolder(@Param("id") id: string, @CurrentUser() user: AuthUser) {
+    return this.svc.deleteFolder(user.id, id);
+  }
+
+  // ---- 软链接（挂载 / 移除）----
+
+  @Post("links")
+  @RequirePerm("kb:write")
+  async mount(@CurrentUser() user: AuthUser, @Body() body: KbLinkInput) {
+    try {
+      return await this.svc.mountDocument(user.id, body);
+    } catch (e) {
+      throw new BadRequestException((e as Error).message);
+    }
+  }
+
+  /** 移除链接：仅删映射行，文档本体/向量/其他目录视图保留 */
+  @Delete("links/:id")
+  @RequirePerm("kb:write")
+  unlink(@Param("id") id: string, @CurrentUser() user: AuthUser) {
+    return this.svc.unlink(user.id, id).then(() => ({ ok: true }));
+  }
+
   @Post("search")
   @RequirePerm("kb:read")
-  search(@CurrentUser() user: AuthUser, @Body() body: { query?: string; topK?: number }) {
+  search(@CurrentUser() user: AuthUser, @Body() body: KbSearchInput) {
     if (!body?.query?.trim()) throw new BadRequestException("query 不能为空");
-    return this.svc.search(user.id, body.query, body.topK);
+    return this.svc.search(user.id, body.query, body.topK, body.folderId);
   }
 
   /** 检索即对话：检索 + 生成带引用的答案；mode 控制检索深度 */
