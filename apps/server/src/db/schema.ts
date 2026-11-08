@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, unique } from "drizzle-orm/sqlite-core";
 import type { HttpToolSpec } from "@aiwb/shared";
 
 /** 一期核心表（总体设计 §7），随模块开发逐步补全 */
@@ -105,10 +105,48 @@ export const kbDocuments = sqliteTable("kb_documents", {
     .default("pending"),
   chunkCount: integer("chunk_count").notNull().default(0),
   error: text("error"),
+  /** 主归属目录 id（原始上传路径），可空=未归类；额外挂载不覆盖它 */
+  primaryFolderId: text("primary_folder_id"),
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
     .$defaultFn(() => new Date()),
 });
+
+/** kb 目录树：纯视图容器（面向人），不持有文档本体、不向量化、不参与检索 */
+export const kbFolders = sqliteTable("kb_folders", {
+  id: text("id").primaryKey(),
+  ownerId: text("owner_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  /** 父目录 id，null=根；不使用外键，环检测在 service 层做（移动时拒绝进自身子树） */
+  parentId: text("parent_id"),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+/** kb 软链接：文档 ↔ 目录多对多挂载，仅引用关系——不复制文档、不重复切片、不重复入向量 */
+export const kbLinks = sqliteTable(
+  "kb_links",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    documentId: text("document_id")
+      .notNull()
+      .references(() => kbDocuments.id, { onDelete: "cascade" }),
+    folderId: text("folder_id")
+      .notNull()
+      .references(() => kbFolders.id, { onDelete: "cascade" }),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (t) => [unique("kb_links_doc_folder_uq").on(t.documentId, t.folderId)],
+);
 
 export const toolboxItems = sqliteTable("toolbox_items", {
   id: text("id").primaryKey(),
