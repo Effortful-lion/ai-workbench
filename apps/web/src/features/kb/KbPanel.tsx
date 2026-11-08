@@ -3,6 +3,7 @@ import type {
   KbAskMode, KbAskResultDto, KbDocumentDto, KbFolderDto, KbFolderNodeDto, KbFolderTreeDto,
 } from "@aiwb/shared";
 import KbTreeView, { KB_DOC_DRAG } from "./KbTreeView";
+import ModelPicker from "../../shell/ModelPicker";
 import { api } from "../../lib/api";
 import { MarkdownText } from "../../lib/markdown";
 import { useAuthStore } from "../../stores/auth";
@@ -87,6 +88,8 @@ export default function KbPanel() {
   const [query, setQuery] = useState("");
   /** 检索深度：quick=向量直取（秒级）/ deep=图谱推理（跨文档多跳） */
   const [mode, setMode] = useState<KbAskMode>("deep");
+  /** 本轮问答的生成模型；undefined=◎ 自动（服务端默认） */
+  const [kbModelId, setKbModelId] = useState<string | undefined>(undefined);
   const [asking, setAsking] = useState(false);
   /** 当前提问的取消句柄：点「停止」时中断 fetch，不再等待结果 */
   const askAbort = useRef<AbortController | null>(null);
@@ -435,7 +438,7 @@ export default function KbPanel() {
     try {
       const result = await api<KbAskResultDto>("/kb/ask", {
         method: "POST",
-        body: JSON.stringify({ query: q, mode }),
+        body: JSON.stringify({ query: q, mode, ...(kbModelId ? { modelId: kbModelId } : {}) }),
         signal: ac.signal,
       }, 130_000);
       setTurns((ts) => ts.map((t, i) => (i === ts.length - 1 ? { ...t, result } : t)));
@@ -668,6 +671,10 @@ export default function KbPanel() {
                 <span className="text-tx3">
                   {mode === "quick" ? "单点事实 / 原文定位" : "跨文档归纳 / 多跳推理"}
                 </span>
+                {/* 生成模型芯片：◎ 自动=服务端默认；LightRAG 链路不受影响 */}
+                <div className="ml-auto">
+                  <ModelPicker value={kbModelId ?? null} onChange={setKbModelId} align="right" />
+                </div>
               </div>
               <div className="flex items-center gap-2 rounded-lg border border-line bg-bg px-3 py-2.5 focus-within:border-acc">
                 <span className="text-acc">▸</span>

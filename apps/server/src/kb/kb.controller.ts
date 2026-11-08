@@ -123,7 +123,7 @@ export class KbController {
   @RequirePerm("kb:read")
   ask(@CurrentUser() user: AuthUser, @Body() body: KbAskInput) {
     if (!body?.query?.trim()) throw new BadRequestException("query 不能为空");
-    return this.svc.ask(user.id, body.query, body.topK, body.mode);
+    return this.svc.ask(user.id, body.query, body.topK, body.mode, body.modelId);
   }
 
   @Get("search")

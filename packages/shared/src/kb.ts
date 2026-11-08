@@ -110,6 +110,8 @@ export interface KbAskInput {
   topK?: number;
   /** 缺省为 deep，保持既有行为 */
   mode?: KbAskMode;
+  /** 指定生成答案的模型 id；缺省由服务端挑默认模型（LightRAG 链路不适用） */
+  modelId?: string;
 }
 
 /** 检索即对话：AI 基于知识库片段作答，answer 中的 [n] 对应 citations 下标 + 1 */

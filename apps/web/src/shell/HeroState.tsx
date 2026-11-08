@@ -6,6 +6,7 @@ import { useChatStore } from "../stores/chat";
 import { usePanelStore } from "../stores/panel";
 import { useUiStore } from "../stores/ui";
 import CommandSuggest from "./CommandSuggest";
+import ModelPicker from "./ModelPicker";
 import type { Command } from "../lib/commands";
 
 function greeting(): string {
@@ -22,6 +23,9 @@ export default function HeroState() {
   const send = useChatStore((s) => s.send);
   const streaming = useChatStore((s) => s.streaming);
   const newChat = useChatStore((s) => s.newChat);
+  // 与聊天栏顶部选择器同源的模型状态（pendingModelId 每轮随 send 携带）
+  const modelId = useChatStore((s) => s.pendingModelId);
+  const setModel = useChatStore((s) => s.setModel);
   const openPanel = usePanelStore((s) => s.openPanel);
   const closeAll = usePanelStore((s) => s.closeAll);
   const setCli = useUiStore((s) => s.setCli);
@@ -140,6 +144,12 @@ export default function HeroState() {
             <kbd className="rounded border border-line px-1.5 py-0.5 font-mono text-[10px] text-tx3">⏎</kbd>
           </div>
           <CommandSuggest text={text} onPick={handleCmd} onClose={() => setText("")} />
+        </div>
+        {/* 模型选择：注释行风格，与聊天栏共用 store 状态 */}
+        <div className="mt-2 flex items-center gap-2 font-mono text-[11px]">
+          <span className="text-tx3">// 模型</span>
+          <ModelPicker value={modelId} onChange={setModel} align="left" />
+          <span className="text-tx3">◎ 自动 = 服务端默认 · 与聊天栏联动</span>
         </div>
       </form>
 

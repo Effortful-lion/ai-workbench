@@ -579,8 +579,15 @@ export class KbService {
   }
 
   /** 检索即对话：先检索片段，再交给对话模型生成带引用的答案；无真实模型时降级抽取式摘要。
-   *  mode：quick=仅向量直取（快，单点事实）/ deep=图谱+向量（慢，跨文档推理） */
-  async ask(userId: string, query: string, topK = 5, mode: KbAskMode = "deep"): Promise<KbAskResultDto> {
+   *  mode：quick=仅向量直取（快，单点事实）/ deep=图谱+向量（慢，跨文档推理）
+   *  modelId：指定生成模型，缺省=服务端默认（pickModel 优先级：指定 → 默认 → 首个 ok） */
+  async ask(
+    userId: string,
+    query: string,
+    topK = 5,
+    mode: KbAskMode = "deep",
+    modelId?: string,
+  ): Promise<KbAskResultDto> {
     const started = Date.now();
     const q = query.trim();
     const depth: KbAskMode = mode === "quick" ? "quick" : "deep";
@@ -643,7 +650,7 @@ export class KbService {
       };
     }
 
-    const model = await this.models.pickModel();
+    const model = await this.models.pickModel(modelId);
     if (model && !model.endpoint.startsWith("mock://")) {
       try {
         const answer = await this.llm.chat({
