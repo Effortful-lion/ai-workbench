@@ -1,5 +1,56 @@
 /** AI 知识库（kb 模块）共享类型 */
 
+/** kb 目录节点：纯视图容器，不持有文档本体，不参与检索 */
+export interface KbFolderDto {
+  id: string;
+  parentId: string | null;
+  name: string;
+  sortOrder: number;
+  /** 该目录下直接挂载的文档数 */
+  docCount: number;
+  createdAt: number;
+}
+
+export interface KbFolderNodeDto extends KbFolderDto {
+  children: KbFolderNodeDto[];
+}
+
+/** 软链接：文档 ↔ 目录挂载关系，仅引用，不复制本体/切片/向量 */
+export interface KbLinkDto {
+  id: string;
+  documentId: string;
+  folderId: string;
+  createdAt: number;
+}
+
+/** 目录树 + 全部挂载关系，前端本地拼装视图 */
+export interface KbFolderTreeDto {
+  folders: KbFolderNodeDto[];
+  links: KbLinkDto[];
+}
+
+export interface KbCreateFolderInput {
+  name: string;
+  parentId?: string;
+}
+
+export interface KbUpdateFolderInput {
+  name?: string;
+  parentId?: string | null;
+}
+
+export interface KbLinkInput {
+  documentId: string;
+  folderId: string;
+}
+
+export interface KbSearchInput {
+  query: string;
+  topK?: number;
+  /** 传入=目录范围检索（含子目录）；不传=全局扁平召回 */
+  folderId?: string;
+}
+
 export interface KbDocumentDto {
   id: string;
   title: string;
@@ -10,6 +61,8 @@ export interface KbDocumentDto {
   status: "embedded" | "pending" | "error";
   chunkCount: number;
   error?: string | null;
+  /** 主归属目录 id（原始上传路径），null=未归类 */
+  primaryFolderId?: string | null;
   createdAt: number;
 }
 
@@ -18,6 +71,8 @@ export interface KbIngestInput {
   /** 纯文本内容（一期仅支持文本类文档） */
   content: string;
   mime?: string;
+  /** 主归属目录 id：写入 chunk primary_path 做路径语义增强；缺省=未归类 */
+  folderId?: string;
 }
 
 export interface KbSearchHitDto {
@@ -27,6 +82,8 @@ export interface KbSearchHitDto {
   /** 余弦相似度 0..1 */
   score: number;
   text: string;
+  /** 主归属虚拟路径（路径语义增强，可空=存量文档未回填） */
+  primaryPath?: string;
 }
 
 export interface KbSearchResultDto {
@@ -35,6 +92,8 @@ export interface KbSearchResultDto {
   /** embedding 来源：model=真实模型接口 / local=本地确定性向量 */
   embedding: "model" | "local";
   latencyMs: number;
+  /** true=目录范围检索经 LightRAG 全局召回后应用层过滤（结果可能少于 topK） */
+  scopeFiltered?: boolean;
 }
 
 /** 检索深度：
