@@ -11,6 +11,7 @@ export interface KbFolderDto {
   createdAt: number;
 }
 
+/** 目录树节点：带子目录的递归结构 */
 export interface KbFolderNodeDto extends KbFolderDto {
   children: KbFolderNodeDto[];
 }
@@ -29,16 +30,19 @@ export interface KbFolderTreeDto {
   links: KbLinkDto[];
 }
 
+/** 新建目录入参：parentId 缺省=根目录 */
 export interface KbCreateFolderInput {
   name: string;
   parentId?: string;
 }
 
+/** 更新目录入参：重命名 / 移动（parentId=null 移到根） */
 export interface KbUpdateFolderInput {
   name?: string;
   parentId?: string | null;
 }
 
+/** 挂载入参：把文档软链接到目录 */
 export interface KbLinkInput {
   documentId: string;
   folderId: string;
