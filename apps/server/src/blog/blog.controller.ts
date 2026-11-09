@@ -22,6 +22,18 @@ export class BlogController {
     return this.svc.listPosts(user.id);
   }
 
+  /** KB 文档行状态映射（发布/下架/上架按钮组的数据源，批量一次查询） */
+  @Get("kb-links")
+  @UseGuards(JwtAuthGuard, PermissionGuard)
+  @RequirePerm("blog:read")
+  async kbLinks(@CurrentUser() user: AuthUser) {
+    try {
+      return await this.svc.listKbLinks(user.id);
+    } catch (e) {
+      throw new BadRequestException((e as Error).message);
+    }
+  }
+
   /** KB 文档一键发布（内容生产在 KB 完成，博客只做展示层副本） */
   @Post("from-kb")
   @UseGuards(JwtAuthGuard, PermissionGuard)
@@ -107,34 +119,23 @@ export class BlogController {
     return this.svc.publicList(username);
   }
 
+  /** 公开路由不捕获异常：service 抛的 404/400 原样传递（不存在的文章应 404 而非 400） */
   @Get("public/:username/:slug")
-  async publicPost(@Param("username") username: string, @Param("slug") slug: string) {
-    try {
-      return await this.svc.publicPost(username, slug);
-    } catch (e) {
-      throw new BadRequestException((e as Error).message);
-    }
+  publicPost(@Param("username") username: string, @Param("slug") slug: string) {
+    return this.svc.publicPost(username, slug);
   }
 
   @Get("public/:username/:slug/comments")
-  async publicComments(@Param("username") username: string, @Param("slug") slug: string) {
-    try {
-      return await this.svc.publicComments(username, slug);
-    } catch (e) {
-      throw new BadRequestException((e as Error).message);
-    }
+  publicComments(@Param("username") username: string, @Param("slug") slug: string) {
+    return this.svc.publicComments(username, slug);
   }
 
   @Post("public/:username/:slug/comments")
-  async addPublicComment(
+  addPublicComment(
     @Param("username") username: string,
     @Param("slug") slug: string,
     @Body() body: BlogCommentInput,
   ) {
-    try {
-      return await this.svc.addPublicComment(username, slug, body);
-    } catch (e) {
-      throw new BadRequestException((e as Error).message);
-    }
+    return this.svc.addPublicComment(username, slug, body);
   }
 }

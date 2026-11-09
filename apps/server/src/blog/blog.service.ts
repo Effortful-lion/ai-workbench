@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import type {
   BlogCommentDto,
   BlogCommentInput,
+  BlogKbLinkDto,
   BlogPostDto,
   BlogPostPatchInput,
   BlogPostStatus,
@@ -40,7 +41,9 @@ export class BlogService {
     return rows.map((r) => this.toDto(r, counts.get(r.id) ?? 0));
   }
 
-  /** 从 KB 文档一键发布：标题/正文取归档原文，slug/摘要自动生成，直接 published */
+  /** 从 KB 文档一键发布（幂等 upsert）：
+   *  未发布 → 新建 published；已下架 → 刷新正文重上架；已发布 → 报错「已在博客中」。
+   *  同一 KB 文档永远只有一篇博客文章（按 ownerId + kbDocId 收口）。 */
   async publishFromKb(userId: string, input: BlogPublishFromKbInput): Promise<BlogPostDto> {
     if (!input?.kbDocId) throw new BadRequestException("kbDocId 不能为空");
     const original = await this.kb.readOriginal(userId, input.kbDocId);
@@ -51,8 +54,36 @@ export class BlogService {
     const title = original.title.trim();
     const summary =
       (input.summary?.trim() || firstParagraph(contentMd)).slice(0, MAX_SUMMARY) || title;
-    const slug = await this.uniqueSlug();
+    const tags = (input.tags ?? []).map((t) => t.trim()).filter(Boolean).slice(0, 6);
     const now = new Date();
+
+    const [existing] = await this.db
+      .select()
+      .from(blogPosts)
+      .where(and(eq(blogPosts.ownerId, userId), eq(blogPosts.kbDocId, input.kbDocId)));
+
+    if (existing) {
+      if (existing.status === "published") {
+        throw new BadRequestException("该文档已在博客中发布，请先下架再重新发布");
+      }
+      const [row] = await this.db
+        .update(blogPosts)
+        .set({
+          title,
+          summary,
+          contentMd,
+          category: input.category,
+          tagsJson: tags,
+          status: "published",
+          publishedAt: now,
+          updatedAt: now,
+        })
+        .where(eq(blogPosts.id, existing.id))
+        .returning();
+      return this.toDto(row, 0);
+    }
+
+    const slug = await this.uniqueSlug();
     const [row] = await this.db
       .insert(blogPosts)
       .values({
@@ -63,7 +94,7 @@ export class BlogService {
         summary,
         contentMd,
         category: input.category,
-        tagsJson: (input.tags ?? []).map((t) => t.trim()).filter(Boolean).slice(0, 6),
+        tagsJson: tags,
         status: "published",
         kbDocId: input.kbDocId,
         publishedAt: now,
@@ -72,6 +103,29 @@ export class BlogService {
       })
       .returning();
     return this.toDto(row, 0);
+  }
+
+  /** KB 文档行状态批量查询：kbDocId → 文章（一次查询，避免 N+1） */
+  async listKbLinks(userId: string): Promise<BlogKbLinkDto[]> {
+    const rows = await this.db
+      .select({
+        kbDocId: blogPosts.kbDocId,
+        postId: blogPosts.id,
+        slug: blogPosts.slug,
+        title: blogPosts.title,
+        status: blogPosts.status,
+      })
+      .from(blogPosts)
+      .where(eq(blogPosts.ownerId, userId));
+    return rows
+      .filter((r): r is typeof r & { kbDocId: string } => !!r.kbDocId)
+      .map((r) => ({
+        kbDocId: r.kbDocId,
+        postId: r.postId,
+        slug: r.slug,
+        title: r.title,
+        status: r.status,
+      }));
   }
 
   async patchPost(userId: string, id: string, patch: BlogPostPatchInput): Promise<BlogPostDto> {
@@ -131,36 +185,28 @@ export class BlogService {
       .where(and(eq(blogPosts.ownerId, owner.id), eq(blogPosts.status, "published")))
       .orderBy(desc(blogPosts.publishedAt));
     const counts = await this.commentCountMap(rows.map((r) => r.id));
-    return rows.map((r) => ({
-      id: r.id,
-      slug: r.slug,
-      title: r.title,
-      summary: r.summary,
-      category: r.category,
-      tags: r.tagsJson,
-      publishedAt: r.publishedAt?.getTime() ?? r.createdAt.getTime(),
-      commentCount: counts.get(r.id) ?? 0,
-    }));
+    return rows.map((r) => this.toPublicDto(r, counts.get(r.id) ?? 0));
   }
 
   async publicPost(username: string, slug: string): Promise<BlogPublicPostDetailDto> {
     const owner = await this.mustUser(username);
-    const [row] = await this.db
+    const published = await this.db
       .select()
       .from(blogPosts)
-      .where(and(eq(blogPosts.ownerId, owner.id), eq(blogPosts.slug, slug)));
-    if (!row || row.status !== "published") throw new NotFoundException("post not found");
+      .where(and(eq(blogPosts.ownerId, owner.id), eq(blogPosts.status, "published")))
+      .orderBy(desc(blogPosts.publishedAt));
+    const ix = published.findIndex((p) => p.slug === slug);
+    if (ix < 0) throw new NotFoundException("post not found");
+    const row = published[ix];
     const comments = await this.listComments(row.id, true);
+    // 列表按发布时间倒序：下一条 = ix+1（更早），上一条 = ix-1（更新）
+    const neighbor = (p?: typeof row) =>
+      p ? { slug: p.slug, title: p.title } : null;
     return {
-      id: row.id,
-      slug: row.slug,
-      title: row.title,
-      summary: row.summary,
-      category: row.category,
-      tags: row.tagsJson,
-      publishedAt: row.publishedAt?.getTime() ?? row.createdAt.getTime(),
-      commentCount: comments.length,
+      ...this.toPublicDto(row, comments.length),
       contentMd: row.contentMd,
+      next: neighbor(published[ix + 1]),
+      prev: neighbor(published[ix - 1]),
     };
   }
 
@@ -267,6 +313,20 @@ export class BlogService {
       commentCount,
       createdAt: r.createdAt.getTime(),
       updatedAt: r.updatedAt.getTime(),
+    };
+  }
+
+  private toPublicDto(r: typeof blogPosts.$inferSelect, commentCount: number): BlogPublicPostDto {
+    return {
+      id: r.id,
+      slug: r.slug,
+      title: r.title,
+      summary: r.summary,
+      category: r.category,
+      tags: r.tagsJson,
+      publishedAt: r.publishedAt?.getTime() ?? r.createdAt.getTime(),
+      commentCount,
+      charCount: r.contentMd.length,
     };
   }
 

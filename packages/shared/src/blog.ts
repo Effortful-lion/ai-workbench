@@ -33,10 +33,29 @@ export interface BlogPublicPostDto {
   tags: string[];
   publishedAt: number;
   commentCount: number;
+  /** 正文字符数（卡片字数刻度 / 「最长」排序依据，免拉全文） */
+  charCount: number;
 }
 
 export interface BlogPublicPostDetailDto extends BlogPublicPostDto {
   contentMd: string;
+  /** 上下篇：按 publishedAt 排序的相邻文章（列表页顺序） */
+  prev: BlogPostNeighborDto | null;
+  next: BlogPostNeighborDto | null;
+}
+
+export interface BlogPostNeighborDto {
+  slug: string;
+  title: string;
+}
+
+/** KB 文档 → 博客文章的状态映射（KB 文档行动作组的数据源，批量一次查询） */
+export interface BlogKbLinkDto {
+  kbDocId: string;
+  postId: string;
+  slug: string;
+  title: string;
+  status: BlogPostStatus;
 }
 
 /** 从 KB 文档一键发布：标题/正文取自 KB 归档原文，slug/摘要自动生成 */

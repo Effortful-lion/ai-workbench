@@ -4,13 +4,13 @@ import { create } from "zustand";
 export const PANEL_IDS = ["models", "agents", "history", "stats", "kb", "blog", "projects", "code", "cal", "mail", "notify", "biz", "crm", "pipe", "resume", "tools", "aitools", "gh"] as const;
 export type PanelId = (typeof PANEL_IDS)[number];
 
-export const PANEL_META: Record<PanelId, { title: string; path: string }> = {
+export const PANEL_META: Record<PanelId, { title: string; path: string; icon?: import("../lib/icons").IconName }> = {
   models: { title: "模型管理", path: "~/models" },
   agents: { title: "AI 助手", path: "~/agents" },
   history: { title: "执行历史", path: "~/history" },
   stats: { title: "访问统计", path: "~/stats" },
   kb: { title: "AI 知识库", path: "~/kb" },
-  blog: { title: "博客", path: "~/blog" },
+  blog: { title: "博客", path: "~/blog", icon: "newspaper" },
   projects: { title: "项目管理", path: "~/projects" },
   code: { title: "代码管理", path: "~/code" },
   cal: { title: "日程管理", path: "~/cal" },

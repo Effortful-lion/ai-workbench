@@ -18,6 +18,7 @@ import HistoryPanel from "../features/history/HistoryPanel";
 import StatsPanel from "../features/stats/StatsPanel";
 import GithubPanel from "../features/github/GithubPanel";
 import { PANEL_META, usePanelStore, type PanelId } from "../stores/panel";
+import { Icon } from "../lib/icons";
 
 const PANEL_BODY: Record<PanelId, () => ReactNode> = {
   models: () => <ModelsPanel />,
@@ -64,7 +65,11 @@ export default function PanelZone() {
               }`}
               onClick={() => activate(id)}
             >
-              <span>{id === active ? "▸" : "·"}</span>
+              {PANEL_META[id].icon ? (
+                <Icon name={PANEL_META[id].icon!} size={12} />
+              ) : (
+                <span>{id === active ? "▸" : "·"}</span>
+              )}
               <span>{PANEL_META[id].title}</span>
               <button
                 className="text-tx3 hover:text-err"

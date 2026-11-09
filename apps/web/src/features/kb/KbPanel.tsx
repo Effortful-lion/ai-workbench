@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
-  KbAskMode, KbAskResultDto, KbDocumentDto, KbFolderDto, KbFolderNodeDto, KbFolderTreeDto,
+  BlogKbLinkDto, BlogPostDto, KbAskMode, KbAskResultDto, KbDocumentDto, KbFolderDto,
+  KbFolderNodeDto, KbFolderTreeDto,
 } from "@aiwb/shared";
 import KbTreeView, { KB_DOC_DRAG } from "./KbTreeView";
 import ModelPicker from "../../shell/ModelPicker";
 import { api } from "../../lib/api";
+import { Icon } from "../../lib/icons";
 import { MarkdownText } from "../../lib/markdown";
 import { useAuthStore } from "../../stores/auth";
 import { useConfirmStore } from "../../stores/confirm";
@@ -113,16 +115,23 @@ export default function KbPanel() {
   const [viewing, setViewing] = useState<{ id: string; title: string; content: string } | null>(null);
   const [viewingLoading, setViewingLoading] = useState(false);
 
-  /** 发布到博客：KB → 博客展示层副本（选分类/标签，slug/摘要自动生成） */
+  /** 发布到博客：KB 文档行是博客唯一的写操作入口（发布/下架/上架/移除成对出现） */
   const [publishing, setPublishing] = useState<{ id: string; title: string } | null>(null);
   const [pubForm, setPubForm] = useState<{ category: string; tags: string }>({ category: "essay", tags: "" });
   const [publishingBusy, setPublishingBusy] = useState(false);
+  /** kbDocId → 博客文章状态（批量一次拉取，KB 行按钮组据此渲染） */
+  const [kbLinks, setKbLinks] = useState<Map<string, BlogKbLinkDto>>(new Map());
+
+  const reloadKbLinks = useCallback(async () => {
+    const links = await api<BlogKbLinkDto[]>("/blog/kb-links").catch(() => [] as BlogKbLinkDto[]);
+    setKbLinks(new Map(links.map((l) => [l.kbDocId, l])));
+  }, []);
 
   const doPublishToBlog = async () => {
     if (!publishing) return;
     setPublishingBusy(true);
     try {
-      const post = await api<{ slug: string }>("/blog/from-kb", {
+      const post = await api<BlogPostDto>("/blog/from-kb", {
         method: "POST",
         body: JSON.stringify({
           kbDocId: publishing.id,
@@ -132,12 +141,52 @@ export default function KbPanel() {
       });
       const username = useAuthStore.getState().user?.username ?? "owner";
       setBulkNote(`✓ 已发布到博客：/b/${username}/${post.slug}`);
+      setKbLinks((prev) =>
+        new Map(prev).set(publishing.id, {
+          kbDocId: publishing.id,
+          postId: post.id,
+          slug: post.slug,
+          title: post.title,
+          status: post.status,
+        }),
+      );
       setPublishing(null);
     } catch (e) {
       setUploadError(e instanceof Error ? e.message : String(e));
     } finally {
       setPublishingBusy(false);
     }
+  };
+
+  /** 下架 / 重新上架：状态在同一个按钮位切换 */
+  const doSetBlogStatus = async (link: BlogKbLinkDto, status: "published" | "archived") => {
+    try {
+      await api(`/blog/posts/${link.postId}`, { method: "PATCH", body: JSON.stringify({ status }) });
+      setKbLinks((prev) => new Map(prev).set(link.kbDocId, { ...link, status }));
+      setBulkNote(status === "published" ? `✓ 《${link.title}》已重新上架` : `✓ 《${link.title}》已下架`);
+    } catch (e) {
+      setUploadError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  /** 移除：只删博客展示副本，KB 文档与向量不受影响 */
+  const doRemoveBlog = (link: BlogKbLinkDto) => {
+    useConfirmStore.getState().ask({
+      title: "从博客移除",
+      message: `《${link.title}》将从博客移除，评论一并删除；KB 文档与向量切片不受影响。`,
+      confirmText: "⏎ 确认移除",
+      danger: true,
+      onConfirm: () => {
+        void api(`/blog/posts/${link.postId}`, { method: "DELETE" }).then(() => {
+          setKbLinks((prev) => {
+            const next = new Map(prev);
+            next.delete(link.kbDocId);
+            return next;
+          });
+          setBulkNote(`✓ 《${link.title}》已从博客移除`);
+        });
+      },
+    });
   };
 
   const viewOriginal = useCallback(async (doc: KbDocumentDto) => {
@@ -162,7 +211,9 @@ export default function KbPanel() {
     } catch (e) {
       setDocsError(e instanceof Error ? e.message : String(e));
     }
-  }, []);
+    // 博客状态随文档列表一起刷新（批量一次，失败不阻塞文档）
+    void reloadKbLinks();
+  }, [reloadKbLinks]);
 
   const reloadTree = useCallback(async () => {
     try {
@@ -887,9 +938,21 @@ export default function KbPanel() {
                       <span className={STATUS_DOT[d.status]}>●</span>
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-tx">{d.title}</span>
-                        <span className="block truncate text-[10px] text-tx3">
-                          {d.path} · {humanSize(d.size)} · {d.chunkCount} chunks · {STATUS_LABEL[d.status]}
-                          {mountCount(d.id) > 1 && ` · ⛓ ${mountCount(d.id)} 目录挂载`}
+                        <span className="flex flex-wrap items-center gap-x-1.5 truncate text-[10px] text-tx3">
+                          <span className="truncate">
+                            {d.path} · {humanSize(d.size)} · {d.chunkCount} chunks · {STATUS_LABEL[d.status]}
+                            {mountCount(d.id) > 1 && ` · ⛓ ${mountCount(d.id)} 目录挂载`}
+                          </span>
+                          {kbLinks.get(d.id)?.status === "published" && (
+                            <span className="flex items-center gap-0.5 text-acc/80">
+                              <Icon name="blog" size={10} /> 已发布
+                            </span>
+                          )}
+                          {kbLinks.get(d.id)?.status === "archived" && (
+                            <span className="flex items-center gap-0.5 text-warn/80">
+                              <Icon name="archive" size={10} /> 已下架
+                            </span>
+                          )}
                         </span>
                         {d.status === "error" && d.error && (
                           <span className="block truncate text-[10px] text-err">{d.error}</span>
@@ -907,19 +970,63 @@ export default function KbPanel() {
                           >
                             👁 原文
                           </button>
-                          {d.status === "embedded" && (
-                            <button
-                              className="text-[11px] text-tx3 hover:text-acc"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setPubForm({ category: "essay", tags: "" });
-                                setPublishing({ id: d.id, title: d.title });
-                              }}
-                              title="一键发布到博客（选分类/标签，slug/摘要自动生成）"
-                            >
-                              ▤ 博客
-                            </button>
-                          )}
+                          {/* 博客动作组：发布/下架/上架/移除始终成对出现在同一位置 */}
+                          {d.status === "embedded" && (() => {
+                            const link = kbLinks.get(d.id);
+                            const openPublish = () => {
+                              setPubForm({ category: "essay", tags: "" });
+                              setPublishing({ id: d.id, title: d.title });
+                            };
+                            if (link?.status === "published") {
+                              return (
+                                <>
+                                  <button
+                                    className="flex items-center gap-1 text-[11px] text-tx3 hover:text-warn"
+                                    onClick={(e) => { e.stopPropagation(); void doSetBlogStatus(link, "archived"); }}
+                                    title="下架：公开页不再可见，评论保留"
+                                  >
+                                    <Icon name="archive" size={11} /> 下架
+                                  </button>
+                                  <button
+                                    className="flex items-center gap-1 text-[11px] text-tx3 hover:text-err"
+                                    onClick={(e) => { e.stopPropagation(); doRemoveBlog(link); }}
+                                    title="从博客移除：删除展示副本与评论，KB 文档不受影响"
+                                  >
+                                    <Icon name="trash" size={11} /> 移除
+                                  </button>
+                                </>
+                              );
+                            }
+                            if (link?.status === "archived") {
+                              return (
+                                <>
+                                  <button
+                                    className="flex items-center gap-1 text-[11px] text-tx3 hover:text-acc"
+                                    onClick={openPublish}
+                                    title="重新上架：按 KB 最新原文刷新后发布"
+                                  >
+                                    <Icon name="restore" size={11} /> 重新上架
+                                  </button>
+                                  <button
+                                    className="flex items-center gap-1 text-[11px] text-tx3 hover:text-err"
+                                    onClick={(e) => { e.stopPropagation(); doRemoveBlog(link); }}
+                                    title="从博客移除：删除展示副本与评论，KB 文档不受影响"
+                                  >
+                                    <Icon name="trash" size={11} /> 移除
+                                  </button>
+                                </>
+                              );
+                            }
+                            return (
+                              <button
+                                className="flex items-center gap-1 text-[11px] text-tx3 hover:text-acc"
+                                onClick={(e) => { e.stopPropagation(); openPublish(); }}
+                                title="发布到博客（选分类/标签，slug 与摘要自动生成）"
+                              >
+                                <Icon name="publish" size={11} /> 发布
+                              </button>
+                            );
+                          })()}
                           {d.status === "error" && (
                             <button
                               className="text-[11px] text-tx3 hover:text-acc"
@@ -1001,7 +1108,10 @@ export default function KbPanel() {
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-bg/80 p-6">
           <div className="w-[min(420px,100%)] rounded-lg border border-line bg-bg1 p-4">
             <div className="mb-3 flex items-center justify-between text-[12px]">
-              <span className="min-w-0 truncate text-tx1">▤ 发布到博客 · {publishing.title}</span>
+              <span className="flex min-w-0 items-center gap-1.5 truncate text-tx1">
+                <Icon name="publish" size={13} className="text-acc" />
+                发布到博客 · {publishing.title}
+              </span>
               <button className="text-tx3 hover:text-acc" onClick={() => setPublishing(null)}>✕</button>
             </div>
             <div className="mb-2 text-[10.5px] text-tx3">// slug 与摘要将自动生成；正文取自 KB 归档原文</div>
@@ -1029,11 +1139,12 @@ export default function KbPanel() {
                 取消
               </button>
               <button
-                className="rounded border border-acc px-3 py-1 text-[11px] text-acc hover:bg-acc/10 disabled:opacity-50"
+                className="flex items-center gap-1.5 rounded border border-acc px-3 py-1 text-[11px] text-acc hover:bg-acc/10 disabled:opacity-50"
                 disabled={publishingBusy}
                 onClick={() => void doPublishToBlog()}
               >
-                {publishingBusy ? "⠋ 发布中…" : "⏎ 确认发布"}
+                <Icon name="publish" size={11} />
+                {publishingBusy ? "发布中…" : "确认发布"}
               </button>
             </div>
           </div>
