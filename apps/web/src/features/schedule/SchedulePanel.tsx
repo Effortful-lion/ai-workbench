@@ -368,6 +368,26 @@ export default function SchedulePanel() {
     }
   };
 
+  /** 就地处理提醒：完成/取消（owner 专用），不打开编辑表单 */
+  const setRemindStatus = async (t: ScheduleTaskDto, status: TaskStatus) => {
+    setBusy(true);
+    setCmdError(null);
+    try {
+      await api(`/schedule/tasks/${t.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status }),
+      });
+      setNotice(
+        status === "done" ? `✓ ${t.title} 已完成` : `✓ ${t.title} 已取消`,
+      );
+      await reload();
+    } catch (e) {
+      setCmdError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const submitCmd = async () => {
     const src = cmd.trim();
     if (!src || busy) return;
@@ -653,23 +673,49 @@ export default function SchedulePanel() {
         </div>
       )}
 
-      {/* 提醒条 */}
+      {/* 提醒条：过期/到点/临近任务，可就地完成或取消 */}
       {reminders.length > 0 && (
         <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-warn/40 bg-bg1 px-3 py-2 text-[11px]">
           <span className="text-warn">⏰ 提醒</span>
           {reminders.map((t) => (
             <span
               key={t.id}
-              className={`rounded border px-2 py-0.5 ${
+              className={`group flex items-center gap-1.5 rounded border px-2 py-0.5 ${
                 t.startsAt < now ? "border-err/50 text-err" : "border-line text-tx2"
               }`}
             >
-              {fmtMD(t.startsAt)} {fmtHM(t.startsAt)} · {t.title}
-              {t.startsAt < now ? " · 已过期" : ""}
+              <button
+                className="hover:underline"
+                onClick={() => {
+                  openEdit(t);
+                }}
+                title="点击编辑该日程"
+              >
+                {fmtMD(t.startsAt)} {fmtHM(t.startsAt)} · {t.title}
+                {t.startsAt < now ? " · 已过期" : ""}
+              </button>
+              {canWrite && (
+                <>
+                  <button
+                    className="hidden text-tx3 hover:text-acc group-hover:inline"
+                    onClick={() => void setRemindStatus(t, "done")}
+                    title="标记完成"
+                  >
+                    ✓
+                  </button>
+                  <button
+                    className="hidden text-tx3 hover:text-err group-hover:inline"
+                    onClick={() => void setRemindStatus(t, "canceled")}
+                    title="取消该日程"
+                  >
+                    ✕
+                  </button>
+                </>
+              )}
             </span>
           ))}
           <span className="ml-auto text-tx3">
-            remindAt 到点提示 · 推送留待站内信模块
+            remindAt 到点提示 · 悬停 ✓完成 / ✕取消 · 推送留待站内信模块
           </span>
         </div>
       )}
