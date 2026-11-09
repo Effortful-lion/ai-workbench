@@ -13,6 +13,7 @@ const TYPE_META: Record<NotificationType, { label: string; icon: string; cls: st
   system: { label: "系统", icon: "⚙", cls: "border-line text-tx3" },
   schedule: { label: "日程", icon: "⏱", cls: "border-warn/50 text-warn" },
   mail: { label: "邮件", icon: "✉", cls: "border-acc/60 text-acc" },
+  blog: { label: "博客", icon: "▤", cls: "border-acc/60 text-acc" },
 };
 
 const TYPE_FILTERS: { id: NotificationType | "all"; label: string }[] = [
@@ -20,6 +21,7 @@ const TYPE_FILTERS: { id: NotificationType | "all"; label: string }[] = [
   { id: "system", label: "系统" },
   { id: "schedule", label: "日程" },
   { id: "mail", label: "邮件" },
+  { id: "blog", label: "博客" },
 ];
 
 const pad = (n: number) => String(n).padStart(2, "0");

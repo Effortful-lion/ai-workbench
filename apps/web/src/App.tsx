@@ -16,6 +16,7 @@ import ToastHost from "./shell/ToastHost";
 import PublicResumePage from "./features/resume/PublicResumePage";
 import PublicToolboxPage from "./features/tools/PublicToolboxPage";
 import PublicContactPage from "./features/contact/PublicContactPage";
+import PublicBlogPage from "./features/blog/PublicBlogPage";
 import { useVisitorCollector } from "./lib/collector";
 import { useHashRoute } from "./lib/route";
 
@@ -58,7 +59,7 @@ export default function App() {
   // hash 路由：刷新后还原面板 / 会话 / CLI 状态
   useHashRoute(!!user);
 
-  // 公开页 /p/:username（简历）、/t/:username（百宝箱）、/c/:username（联系我）：游客无需登录，只读
+  // 公开页 /p/:username（简历）、/t/:username（百宝箱）、/c/:username（联系我）、/b/:username(/:slug)（博客）：游客无需登录，只读
   const decoded = (raw: string | undefined) => {
     if (!raw) return null;
     try {
@@ -73,6 +74,12 @@ export default function App() {
   if (publicToolbox) return <PublicToolboxPage username={publicToolbox} />;
   const publicContact = decoded(window.location.pathname.match(/^\/c\/([^/]+)\/?$/)?.[1]);
   if (publicContact) return <PublicContactPage username={publicContact} />;
+  const blogMatch = window.location.pathname.match(/^\/b\/([^/]+)(?:\/([^/]+))?\/?$/);
+  if (blogMatch) {
+    const blogUser = decoded(blogMatch[1]);
+    const blogSlug = decoded(blogMatch[2]);
+    if (blogUser) return <PublicBlogPage username={blogUser} slug={blogSlug ?? undefined} />;
+  }
 
   if (!user) return <LoginScreen />;
 

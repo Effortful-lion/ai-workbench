@@ -113,6 +113,33 @@ export default function KbPanel() {
   const [viewing, setViewing] = useState<{ id: string; title: string; content: string } | null>(null);
   const [viewingLoading, setViewingLoading] = useState(false);
 
+  /** 发布到博客：KB → 博客展示层副本（选分类/标签，slug/摘要自动生成） */
+  const [publishing, setPublishing] = useState<{ id: string; title: string } | null>(null);
+  const [pubForm, setPubForm] = useState<{ category: string; tags: string }>({ category: "essay", tags: "" });
+  const [publishingBusy, setPublishingBusy] = useState(false);
+
+  const doPublishToBlog = async () => {
+    if (!publishing) return;
+    setPublishingBusy(true);
+    try {
+      const post = await api<{ slug: string }>("/blog/from-kb", {
+        method: "POST",
+        body: JSON.stringify({
+          kbDocId: publishing.id,
+          category: pubForm.category,
+          tags: pubForm.tags.split(/[,，\s]+/).map((t) => t.trim()).filter(Boolean),
+        }),
+      });
+      const username = useAuthStore.getState().user?.username ?? "owner";
+      setBulkNote(`✓ 已发布到博客：/b/${username}/${post.slug}`);
+      setPublishing(null);
+    } catch (e) {
+      setUploadError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPublishingBusy(false);
+    }
+  };
+
   const viewOriginal = useCallback(async (doc: KbDocumentDto) => {
     setViewing(null);
     setViewingLoading(true);
@@ -880,6 +907,19 @@ export default function KbPanel() {
                           >
                             👁 原文
                           </button>
+                          {d.status === "embedded" && (
+                            <button
+                              className="text-[11px] text-tx3 hover:text-acc"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setPubForm({ category: "essay", tags: "" });
+                                setPublishing({ id: d.id, title: d.title });
+                              }}
+                              title="一键发布到博客（选分类/标签，slug/摘要自动生成）"
+                            >
+                              ▤ 博客
+                            </button>
+                          )}
                           {d.status === "error" && (
                             <button
                               className="text-[11px] text-tx3 hover:text-acc"
@@ -953,6 +993,49 @@ export default function KbPanel() {
                 <MarkdownText text={viewing.content} />
               </div>
             )}
+          </div>
+        </div>
+      )}
+      {/* 发布到博客弹层：分类/标签选择 */}
+      {publishing && (
+        <div className="absolute inset-0 z-30 flex items-center justify-center bg-bg/80 p-6">
+          <div className="w-[min(420px,100%)] rounded-lg border border-line bg-bg1 p-4">
+            <div className="mb-3 flex items-center justify-between text-[12px]">
+              <span className="min-w-0 truncate text-tx1">▤ 发布到博客 · {publishing.title}</span>
+              <button className="text-tx3 hover:text-acc" onClick={() => setPublishing(null)}>✕</button>
+            </div>
+            <div className="mb-2 text-[10.5px] text-tx3">// slug 与摘要将自动生成；正文取自 KB 归档原文</div>
+            <div className="mb-3 flex flex-wrap gap-1.5 text-[11px]">
+              {(["essay", "kb", "agent", "pipe"] as const).map((c) => (
+                <button
+                  key={c}
+                  className={`rounded px-2 py-1 transition-colors ${
+                    pubForm.category === c ? "bg-acc/10 text-acc" : "border border-line text-tx3 hover:text-acc"
+                  }`}
+                  onClick={() => setPubForm({ ...pubForm, category: c })}
+                >
+                  {c === "essay" ? "#随笔" : c === "kb" ? "#知识库" : c === "agent" ? "#Agent" : "#管道"}
+                </button>
+              ))}
+            </div>
+            <input
+              className="mb-3 w-full rounded border border-line bg-bg px-2 py-1.5 text-[12px] outline-none placeholder:text-tx3 focus:border-acc"
+              placeholder="标签（逗号/空格分隔，可空）"
+              value={pubForm.tags}
+              onChange={(e) => setPubForm({ ...pubForm, tags: e.target.value })}
+            />
+            <div className="flex justify-end gap-2">
+              <button className="rounded border border-line px-3 py-1 text-[11px] text-tx3 hover:text-tx2" onClick={() => setPublishing(null)}>
+                取消
+              </button>
+              <button
+                className="rounded border border-acc px-3 py-1 text-[11px] text-acc hover:bg-acc/10 disabled:opacity-50"
+                disabled={publishingBusy}
+                onClick={() => void doPublishToBlog()}
+              >
+                {publishingBusy ? "⠋ 发布中…" : "⏎ 确认发布"}
+              </button>
+            </div>
           </div>
         </div>
       )}

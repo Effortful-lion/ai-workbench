@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import ModelsPanel from "../features/models/ModelsPanel";
 import AgentsPanel from "../features/agents/AgentsPanel";
 import KbPanel from "../features/kb/KbPanel";
+import BlogPanel from "../features/blog/BlogPanel";
 import ProjectsPanel from "../features/projects/ProjectsPanel";
 import CodePanel from "../features/code/CodePanel";
 import SchedulePanel from "../features/schedule/SchedulePanel";
@@ -24,6 +25,7 @@ const PANEL_BODY: Record<PanelId, () => ReactNode> = {
   history: () => <HistoryPanel />,
   stats: () => <StatsPanel />,
   kb: () => <KbPanel />,
+  blog: () => <BlogPanel />,
   projects: () => <ProjectsPanel />,
   code: () => <CodePanel />,
   cal: () => <SchedulePanel />,

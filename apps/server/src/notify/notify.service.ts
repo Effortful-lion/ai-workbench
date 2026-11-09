@@ -27,9 +27,11 @@ function normalizeType(v: unknown, fallback: NotificationType = "system"): Notif
     system: "system",
     schedule: "schedule",
     mail: "mail",
+    blog: "blog",
     "系统": "system",
     "日程": "schedule",
     "邮件": "mail",
+    "博客": "blog",
   };
   const t = map[s];
   if (!t) throw new BadRequestException("type 仅支持 system / schedule / mail");
@@ -85,7 +87,7 @@ export class NotifyService {
       .from(notifications)
       .where(eq(notifications.userId, userId));
 
-    const types: Record<NotificationType, number> = { system: 0, schedule: 0, mail: 0 };
+    const types: Record<NotificationType, number> = { system: 0, schedule: 0, mail: 0, blog: 0 };
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
 

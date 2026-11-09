@@ -19,6 +19,7 @@ const PANEL_NAMES: Record<PanelId, string> = {
   history: "执行历史",
   stats: "访问统计",
   kb: "AI 知识库",
+  blog: "博客",
   projects: "项目管理",
   code: "代码管理",
   cal: "日程管理",

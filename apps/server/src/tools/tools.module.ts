@@ -10,12 +10,14 @@ import { KbTools } from "./kb.tools";
 import { ToolsController } from "./tools.controller";
 import { GithubModule } from "../github/github.module";
 import { KbModule } from "../kb/kb.module";
+import { BlogModule } from "../blog/blog.module";
+import { BlogTools } from "./blog.tools";
 
 /** Tool Registry 全局可见：任何模块的 provider 都可以用 @RegisterTool 注册能力 */
 @Global()
 @Module({
-  imports: [DiscoveryModule, GithubModule, KbModule],
-  providers: [ToolRegistry, OperationToolsService, CustomToolsService, WebTools, SiteTools, SearchTools, KbTools],
+  imports: [DiscoveryModule, GithubModule, KbModule, BlogModule],
+  providers: [ToolRegistry, OperationToolsService, CustomToolsService, WebTools, SiteTools, SearchTools, KbTools, BlogTools],
   controllers: [ToolsController],
   exports: [ToolRegistry],
 })

@@ -4,6 +4,7 @@ export * from "./models.js";
 export * from "./chat.js";
 export * from "./agents.js";
 export * from "./kb.js";
+export * from "./blog.js";
 export * from "./resume.js";
 export * from "./contact.js";
 export * from "./toolbox.js";

@@ -101,3 +101,21 @@ blog_comments: id, postId→blog_posts, userId?(可空=游客), nickname, conten
 
 - 评论楼层嵌套 >1 级、评论点赞、富文本编辑器、独立站点路由/SEO sitemap（可后补）、邮件订阅、多语言
 - AI 自动发布（永远人工点发布键，AI 只产草稿——与"Agent 只到草稿为止"的安全边界一致）
+
+## 8. 决策修订（2026-11-09 终版）：博客 = 纯展示层，内容生产全部复用 KB
+
+用户最终裁决：**博客模块不做任何内容生产设施**——没有编辑器、没有草稿箱、没有上传通道。理由：文档上传/解析/切片/索引在 KB 已全部实现（`/kb/documents` ingest），文件存储在 storage（MinIO presign 直传）已实现，博客再建一套就是重复逻辑。终版内容流：
+
+```
+书写/上传 ──▶ KB（文档本体 + 向量切片，AI 大脑）
+                 │  KB 面板「发布到博客」动作（选分类/标签）
+                 ▼
+            blog_posts（展示副本：slug/摘要/分类/发布状态）
+                 │
+        公开页 /b/:u/:slug + 评论（notify 触达）
+```
+
+- **唯一创作入口 = KB**：应用内 Markdown 书写与 MD/PDF 上传都落到 KB 文档（KB 已具备），博客不感知"怎么写"
+- **发布动作在 KB 面板**：对任一文档点「发布到博客」→ 弹分类/标签选择 → 服务端从 KB 文档生成 blog_post（slug 自动生成、摘要取首段、status=published），kbDocId 回链
+- **AI 侧不再需要 blog.draft**：AI 写的内容进 KB 就等于进入生产管线；blog.tools 仅保留 `blog.search`（检索已发表）与 `blog.listPublished`
+- 博客面板（BlogPanel）职责收窄为：已发布文章管理（改分类/下架/删除）+ 评论管理；列表视图的"新建"按钮跳转引导去 KB

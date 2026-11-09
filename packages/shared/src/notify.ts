@@ -1,6 +1,6 @@
 /** 站内信 / 通知中心（notify 模块）共享类型 —— 系统消息 + 日程提醒 + 重要邮件 */
 
-export const NOTIFICATION_TYPES = ["system", "schedule", "mail"] as const;
+export const NOTIFICATION_TYPES = ["system", "schedule", "mail", "blog"] as const;
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 
 export interface NotificationDto {

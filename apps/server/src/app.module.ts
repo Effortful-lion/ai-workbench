@@ -7,6 +7,7 @@ import { ChatModule } from "./chat/chat.module";
 import { ToolsModule } from "./tools/tools.module";
 import { AgentsModule } from "./agents/agents.module";
 import { KbModule } from "./kb/kb.module";
+import { BlogModule } from "./blog/blog.module";
 import { ResumeModule } from "./resume/resume.module";
 import { ContactModule } from "./contact/contact.module";
 import { ToolboxModule } from "./toolbox/toolbox.module";
@@ -24,7 +25,7 @@ import { GithubModule } from "./github/github.module";
 
 @Module({
   imports: [
-    DbModule, AuthModule, ToolsModule, ModelsModule, AgentsModule, ChatModule, KbModule, ResumeModule, ContactModule,
+    DbModule, AuthModule, ToolsModule, ModelsModule, AgentsModule, ChatModule, KbModule, BlogModule, ResumeModule, ContactModule,
     ToolboxModule, ProjectsModule, CodeModule, ScheduleModule, MailModule, NotifyModule, CommerceModule,
     CrmModule,
     PipeModule,

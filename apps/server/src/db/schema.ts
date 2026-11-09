@@ -148,6 +148,49 @@ export const kbLinks = sqliteTable(
   (t) => [unique("kb_links_doc_folder_uq").on(t.documentId, t.folderId)],
 );
 
+/** 博客文章：展示层副本——内容生产在 KB（kbDocId 回链），博客只管 slug/摘要/分类/状态 */
+export const blogPosts = sqliteTable("blog_posts", {
+  id: text("id").primaryKey(),
+  ownerId: text("owner_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  /** 公开页 URL 段 /b/:username/:slug，8 位短码 */
+  slug: text("slug").notNull().unique(),
+  title: text("title").notNull(),
+  summary: text("summary").notNull().default(""),
+  contentMd: text("content_md").notNull(),
+  category: text("category", { enum: ["kb", "agent", "pipe", "essay"] })
+    .notNull()
+    .default("essay"),
+  tagsJson: text("tags_json", { mode: "json" }).$type<string[]>().notNull().default([]),
+  status: text("status", { enum: ["draft", "published", "archived"] })
+    .notNull()
+    .default("draft"),
+  kbDocId: text("kb_doc_id"),
+  publishedAt: integer("published_at", { mode: "timestamp" }),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+/** 博客评论：一级即可（无深层嵌套）；游客评论仅昵称；过审制开关在 status 上 */
+export const blogComments = sqliteTable("blog_comments", {
+  id: text("id").primaryKey(),
+  postId: text("post_id")
+    .notNull()
+    .references(() => blogPosts.id, { onDelete: "cascade" }),
+  userId: text("user_id").references(() => users.id, { onDelete: "set null" }),
+  nickname: text("nickname").notNull(),
+  content: text("content").notNull(),
+  status: text("status", { enum: ["approved", "hidden"] }).notNull().default("approved"),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
 export const toolboxItems = sqliteTable("toolbox_items", {
   id: text("id").primaryKey(),
   ownerId: text("owner_id")
@@ -354,7 +397,7 @@ export const notifications = sqliteTable("notifications", {
   userId: text("user_id")
     .notNull()
     .references(() => users.id, { onDelete: "cascade" }),
-  type: text("type", { enum: ["system", "schedule", "mail"] }).notNull().default("system"),
+  type: text("type", { enum: ["system", "schedule", "mail", "blog"] }).notNull().default("system"),
   title: text("title").notNull(),
   body: text("body").notNull().default(""),
   isRead: integer("is_read", { mode: "boolean" }).notNull().default(false),
