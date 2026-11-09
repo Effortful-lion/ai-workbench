@@ -113,24 +113,37 @@ button{font-family:inherit;background:none;border:none;color:inherit;cursor:poin
 .r-more{flex:none;border:1px solid var(--line2);border-radius:3px;padding:5px 12px;font-family:var(--mono);font-size:10.5px;color:var(--tx2);transition:.15s;margin-top:2px}
 .r-more:hover{border-color:var(--acc);color:var(--acc)}
 
-/* ============ 阅读层（FLIP 自行展开） ============ */
+/* ============ 阅读页（FLIP 自行铺满全屏 = 独立页面语义） ============ */
 #reader{position:fixed;inset:0;z-index:100;pointer-events:none}
 #reader.open{pointer-events:auto}
-#readerMask{position:absolute;inset:0;background:color-mix(in srgb,var(--bg) 72%,transparent);opacity:0;transition:opacity .3s}
+#readerMask{position:absolute;inset:0;background:var(--bg);opacity:0;transition:opacity .3s}
 #reader.open #readerMask{opacity:1}
 #readerPanel{
-  position:absolute;background:var(--bg1);border:1px solid var(--line2);border-radius:4px;
+  position:absolute;background:var(--bg);border:none;border-radius:0;
   display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 80px rgba(0,0,0,.5);
 }
-.rp-head{flex:none;display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--bg2);font-family:var(--mono);font-size:10.5px;color:var(--tx3)}
-.rp-head .x{margin-left:auto;color:var(--tx3)}
-.rp-head .x:hover{color:var(--acc)}
-.rp-body{flex:1;overflow-y:auto;padding:22px 26px}
-.rp-body h2{font-size:20px;font-weight:600;color:var(--tx);line-height:1.5}
-.rp-body .tags{margin-top:10px;font-family:var(--mono);font-size:10.5px;color:var(--acc);letter-spacing:.05em}
-.rp-body .hr{margin:16px 0;border:none;border-top:1px solid var(--line)}
-.rp-body p{font-size:14px;line-height:1.95;color:var(--body);margin-bottom:14px}
-.rp-foot{flex:none;border-top:1px solid var(--line);padding:8px 16px;font-family:var(--mono);font-size:10px;color:var(--tx3)}
+.rp-head{flex:none;display:flex;align-items:center;gap:14px;padding:0 24px;height:50px;border-bottom:1px solid var(--line);background:var(--bg);font-family:var(--mono);font-size:10.5px;color:var(--tx3)}
+.rp-back{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:10.5px;color:var(--tx2);transition:.15s}
+.rp-back:hover{color:var(--acc)}
+.rp-head .sp{flex:1}
+.rp-body{flex:1;overflow-y:auto}
+/* 阅读版心：680px，深度阅读排版 */
+.article{max-width:680px;margin:0 auto;padding:44px 24px 64px}
+.article h2{font-size:24px;font-weight:600;color:var(--tx);line-height:1.6;letter-spacing:.01em}
+.article .rp-meta{margin-top:14px;display:flex;flex-wrap:wrap;align-items:center;gap:14px;font-family:var(--mono);font-size:10.5px;color:var(--tx3)}
+.article .rp-meta .tags{color:var(--acc);letter-spacing:.05em}
+.article .hr{margin:22px 0 26px;border:none;height:1px;background:linear-gradient(90deg,var(--acc),var(--line) 30%)}
+.article p{font-size:15px;line-height:2.05;color:var(--body);margin-bottom:18px}
+.article .kicker{font-family:var(--mono);font-size:10.5px;color:var(--acc);letter-spacing:.08em;margin-bottom:12px}
+/* 上下篇导航 */
+.rp-nav{max-width:680px;margin:0 auto;padding:0 24px 56px;display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.rp-nav button{border:1px solid var(--line);border-radius:4px;padding:12px 16px;text-align:left;transition:.15s;min-width:0}
+.rp-nav button:hover{border-color:var(--acc);background:var(--a0d)}
+.rp-nav button.nx{text-align:right}
+.rp-nav .lab{display:block;font-family:var(--mono);font-size:9.5px;color:var(--tx3);letter-spacing:.08em;margin-bottom:5px}
+.rp-nav .ti{display:block;font-size:12.5px;color:var(--tx2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rp-nav button:hover .ti{color:var(--acc)}
+.rp-foot{flex:none;border-top:1px solid var(--line);padding:8px 16px;font-family:var(--mono);font-size:10px;color:var(--tx3);text-align:center}
 
 /* ============ 状态栏 ============ */
 .foot{
@@ -176,16 +189,24 @@ button{font-family:inherit;background:none;border:none;color:inherit;cursor:poin
     <span class="r">原位放大（FLIP） · Esc 关闭阅读层</span>
   </footer>
 
-  <!-- 阅读层 -->
+  <!-- 阅读页：FLIP 铺满全屏（独立页面语义：hash 路由 / 浏览器返回 / 上下篇） -->
   <div id="reader">
     <div id="readerMask"></div>
     <div id="readerPanel">
       <div class="rp-head">
+        <button class="rp-back" id="rpBack">◄ 返回台账</button>
         <span id="rpCrumb">ledger://blog/…</span>
-        <button class="x" id="rpClose">✕ 关闭（Esc）</button>
+        <span class="sp"></span>
+        <span>Esc 返回 · 浏览器 ← 亦可</span>
       </div>
-      <div class="rp-body" id="rpBody"></div>
-      <div class="rp-foot">AI-WORKBENCH · 原位放大自测绘台账 · 无截断</div>
+      <div class="rp-body">
+        <article class="article" id="rpArticle"></article>
+        <nav class="rp-nav">
+          <button id="rpPrev"><span class="lab">◄ 上一篇（更早）</span><span class="ti" id="rpPrevT">—</span></button>
+          <button id="rpNext" class="nx"><span class="lab">下一篇（更新）►</span><span class="ti" id="rpNextT">—</span></button>
+        </nav>
+      </div>
+      <div class="rp-foot">AI-WORKBENCH · 独立阅读页 · hash 路由可直达 · 深度阅读版心 680px</div>
     </div>
   </div>
 
@@ -274,25 +295,46 @@ setOpen(ledger.firstElementChild);
 /* 鼠标离开台账：回归默认展开 */
 ledger.addEventListener("mouseleave", () => setOpen(ledger.firstElementChild));
 
-/* ============ 阅读层（FLIP 自行展开） ============ */
+/* ============ 阅读页：FLIP 铺满全屏 + hash 路由（独立页面语义） ============ */
 const reader = document.getElementById("reader");
 const panel = document.getElementById("readerPanel");
 const mask = document.getElementById("readerMask");
-function openReader(p, el){
-  const nr = el.getBoundingClientRect();
-  panel.style.transition = "none";
-  setPanelRect(nr.left, nr.top, nr.width, Math.max(nr.height, 46));
-  panel.style.opacity = "1";
+let curIdx = -1;
+const idxOf = (id) => POSTS.findIndex((p) => p.id === id);
+
+function renderArticle(p){
+  curIdx = idxOf(p.id);
+  const prev = POSTS[curIdx + 1], next = POSTS[curIdx - 1];
   document.getElementById("rpCrumb").textContent = `ledger://blog/${p.id} · ${p.date}`;
-  document.getElementById("rpBody").innerHTML =
-    `<h2>${p.t}</h2><div class="tags">${p.tags.join(" ")} · ${p.sum}</div><hr class="hr">` +
+  document.getElementById("rpArticle").innerHTML =
+    `<div class="kicker">${p.id} · ${p.tags.join(" ")}</div>` +
+    `<h2>${p.t}</h2>` +
+    `<div class="rp-meta"><span class="tags">${p.tags.join(" ")}</span><span>${p.date}</span><span>约 ${p.body.join("").length} 字 · 预计 ${Math.max(1, Math.round(p.body.join("").length / 400))} 分钟</span></div>` +
+    `<hr class="hr">` +
+    `<div class="kicker">摘要</div>` +
     p.body.map((s) => `<p>${s}</p>`).join("");
-  reader.classList.add("open");
-  requestAnimationFrame(() => {
-    const pw = Math.min(720, innerWidth * 0.92), ph = innerHeight * 0.82;
-    panel.style.transition = "all .42s var(--ease)";
-    setPanelRect((innerWidth - pw) / 2, (innerHeight - ph) / 2 + 10, pw, ph);
-  });
+  document.getElementById("rpPrevT").textContent = prev ? `${prev.id} ${prev.t}` : "— 已是更早 —";
+  document.getElementById("rpNextT").textContent = next ? `${next.id} ${next.t}` : "— 已是最新 —";
+  document.getElementById("rpPrev").style.opacity = prev ? 1 : .35;
+  document.getElementById("rpNext").style.opacity = next ? 1 : .35;
+  document.querySelector(".rp-body").scrollTop = 0;
+}
+function goIdx(i){ if (POSTS[i]) { renderArticle(POSTS[i]); location.hash = `#/p/${POSTS[i].id}`; } }
+function openReader(p, el){
+  renderArticle(p);
+  if (!reader.classList.contains("open")) {
+    // FLIP 第一帧：面板贴合台账行
+    const nr = el.getBoundingClientRect();
+    panel.style.transition = "none";
+    setPanelRect(nr.left, nr.top, nr.width, Math.max(nr.height, 46));
+    panel.style.opacity = "1";
+    reader.classList.add("open");
+    requestAnimationFrame(() => {
+      panel.style.transition = "all .45s var(--ease)";
+      setPanelRect(0, 0, innerWidth, innerHeight);
+    });
+  }
+  if (location.hash !== `#/p/${p.id}`) history.pushState(null, "", `#/p/${p.id}`);
 }
 function setPanelRect(x, y, w, h){
   panel.style.left = x + "px"; panel.style.top = y + "px";
@@ -303,10 +345,31 @@ function closeReader(){
   panel.style.transition = "all .3s var(--ease)";
   panel.style.opacity = "0";
   reader.classList.remove("open");
+  if (location.hash.startsWith("#/p/")) history.pushState(null, "", location.pathname);
 }
+/* 浏览器返回键 / Esc / 返回按钮三通道 */
+window.addEventListener("popstate", () => {
+  const m = location.hash.match(/^#\/p\/(\d+)$/);
+  if (m && idxOf(m[1]) >= 0) {
+    if (!reader.classList.contains("open")) openReader(POSTS[idxOf(m[1])], ledger.children[idxOf(m[1])]);
+    else renderArticle(POSTS[idxOf(m[1])]);
+  } else closeReader();
+});
 mask.addEventListener("click", closeReader);
-document.getElementById("rpClose").addEventListener("click", closeReader);
-window.addEventListener("keydown", (e) => { if (e.key === "Escape") closeReader(); });
+document.getElementById("rpBack").addEventListener("click", closeReader);
+document.getElementById("rpPrev").addEventListener("click", () => goIdx(curIdx + 1));
+document.getElementById("rpNext").addEventListener("click", () => goIdx(curIdx - 1));
+window.addEventListener("keydown", (e) => {
+  if (!reader.classList.contains("open")) return;
+  if (e.key === "Escape") closeReader();
+  if (e.key === "ArrowLeft") goIdx(curIdx + 1);
+  if (e.key === "ArrowRight") goIdx(curIdx - 1);
+});
+/* 直接带 hash 打开（可分享/收藏） */
+addEventListener("load", () => {
+  const m = location.hash.match(/^#\/p\/(\d+)$/);
+  if (m && idxOf(m[1]) >= 0) openReader(POSTS[idxOf(m[1])], ledger.children[idxOf(m[1])]);
+});
 
 /* ============ 主题切换 ============ */
 document.getElementById("themeBtn").addEventListener("click", () => {
