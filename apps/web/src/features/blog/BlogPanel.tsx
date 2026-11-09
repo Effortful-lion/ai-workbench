@@ -24,7 +24,15 @@ const STATUS_META: Record<BlogCommentStatus, { label: string; cls: string }> = {
  */
 export default function BlogPanel() {
   const openPanel = usePanelStore((s) => s.openPanel);
-  const [tab, setTab] = useState<Tab>("posts");
+  // 公开页「去审核」带 ?tab=moderation 整页跳转进来，直接落到审核 tab
+  const [tab, setTab] = useState<Tab>(() =>
+    new URLSearchParams(window.location.search).get("tab") === "moderation" ? "moderation" : "posts",
+  );
+
+  useEffect(() => {
+    if (!window.location.search.includes("tab=")) return;
+    history.replaceState(null, "", window.location.pathname + window.location.hash);
+  }, []);
 
   const [posts, setPosts] = useState<BlogPostDto[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -105,6 +113,7 @@ export default function BlogPanel() {
     return {
       threads: roots.map((r) => ({ root: r, children: grouped.get(r.id) ?? [] })),
       total: roots.length,
+      commentTotal: approved.length,
       page: 1,
       pageSize: Math.max(10, roots.length),
     };

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type {
-  BlogCommentDto, BlogCommentPageDto, BlogPublicPostDetailDto, BlogPublicPostDto,
+  BlogCommentDto, BlogCommentPageDto, BlogModerationItemDto, BlogPublicPostDetailDto, BlogPublicPostDto,
 } from "@aiwb/shared";
 import { api } from "../../lib/api";
 import { Icon } from "../../lib/icons";
@@ -20,6 +20,10 @@ export default function PublicBlogPage({ username, slug }: { username: string; s
   const [comments, setComments] = useState<BlogCommentPageDto | null>(null);
   const [commentsPage, setCommentsPage] = useState(1);
   const [loadingMore, setLoadingMore] = useState(false);
+  /** 博主视角：待审评论数（公开页看不到待审评论，需要入口告知） */
+  const [pendingCount, setPendingCount] = useState(0);
+
+  const isOwner = !!viewer && viewer.username === username;
 
   const panelRef = useRef<HTMLDivElement>(null);
   const jumpFrom = useRef<DOMRect | null>(null);
@@ -89,6 +93,18 @@ export default function PublicBlogPage({ username, slug }: { username: string; s
       setLoadingMore(false);
     }
   }, [openSlug, commentsPage, loadingMore, loadComments]);
+
+  // 博主本人浏览自己的公开博客：拉待审计数（未登录/无权限静默忽略）
+  useEffect(() => {
+    if (!isOwner) return;
+    let alive = true;
+    api<BlogModerationItemDto[]>("/blog/moderation/comments?status=pending")
+      .then((d) => alive && setPendingCount(d.length))
+      .catch(() => alive && setPendingCount(0));
+    return () => {
+      alive = false;
+    };
+  }, [isOwner, openSlug]);
 
   // FLIP：卡片矩形 → 全屏（450ms）
   useLayoutEffect(() => {
@@ -188,6 +204,7 @@ export default function PublicBlogPage({ username, slug }: { username: string; s
       </div>
 
       <div className="mx-auto w-full max-w-[1100px] px-5 pb-16 pt-5">
+        <ModerationNotice count={pendingCount} />
         {listError && <div className="py-10 text-[12px] text-err">✗ {listError}</div>}
         {!posts && !listError && <div className="py-16 text-center text-[12px] text-tx3">⠋ 读取博客…</div>}
         {posts && (
@@ -230,11 +247,32 @@ export default function PublicBlogPage({ username, slug }: { username: string; s
                 onSubmitComment={submitComment}
                 onLoadMoreComments={() => void loadMoreComments()}
                 loadingMoreComments={loadingMore}
+                commentsNotice={<ModerationNotice count={pendingCount} />}
               />
             )}
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/** 博主视角入口：公开页看不到待审评论，需显式告知数量并给出审核台入口 */
+function ModerationNotice({ count }: { count: number }) {
+  if (count <= 0) return null;
+  return (
+    <div className="mx-auto mb-3 flex w-full max-w-[680px] flex-wrap items-center gap-2 px-5 text-[11px]">
+      <span className="flex flex-1 flex-wrap items-center gap-2 rounded border border-warn/40 bg-warn/5 px-3 py-2 text-warn">
+        <Icon name="clock" size={12} />
+        <span>{count} 条评论待审核 · 公开页不可见</span>
+        <button
+          className="ml-auto flex items-center gap-1 rounded border border-warn/50 px-2 py-0.5 text-[10.5px] transition-colors hover:bg-warn/10"
+          onClick={() => window.location.assign("/?tab=moderation#/p=blog")}
+        >
+          去审核
+          <Icon name="next" size={11} />
+        </button>
+      </span>
     </div>
   );
 }

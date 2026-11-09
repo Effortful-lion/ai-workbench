@@ -248,6 +248,13 @@ export class BlogService {
       .select({ total: count() })
       .from(blogComments)
       .where(rootWhere);
+    // 楼层数用于分页，评论总条数（含回复）用于「评论 · N」展示
+    const [{ allTotal }] = await this.db
+      .select({ allTotal: count() })
+      .from(blogComments)
+      .where(and(eq(blogComments.postId, post.id), eq(blogComments.status, "approved")));
+    const rootTotal = Number(total ?? 0);
+    const commentTotal = Number(allTotal ?? 0);
     const roots = await this.db
       .select()
       .from(blogComments)
@@ -256,7 +263,7 @@ export class BlogService {
       .limit(size)
       .offset((p - 1) * size);
     if (roots.length === 0) {
-      return { threads: [], total: Number(total ?? 0), page: p, pageSize: size };
+      return { threads: [], total: rootTotal, commentTotal, page: p, pageSize: size };
     }
     const children = await this.db
       .select()
@@ -277,7 +284,8 @@ export class BlogService {
     }
     return {
       threads: roots.map((r) => ({ root: this.toCommentDto(r), children: grouped.get(r.id) ?? [] })),
-      total: Number(total ?? 0),
+      total: rootTotal,
+      commentTotal,
       page: p,
       pageSize: size,
     };

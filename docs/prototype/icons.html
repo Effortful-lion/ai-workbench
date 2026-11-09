@@ -1,0 +1,826 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>图标对比 · ICON SET COMPARISON</title>
+<link rel="stylesheet" href="https://unpkg.com/@tabler/icons-webfont@3.31.0/dist/tabler-icons.min.css" />
+<link rel="stylesheet" href="https://unpkg.com/remixicon@4.6.0/fonts/remixicon.css" />
+<style>
+  :root {
+    --bg: #0B0D10; --bg1: #12151A; --bg2: #181C22; --line: #23282F;
+    --acc: #00E59B; --warn: #FFB000; --err: #FF5F56;
+    --tx: #E6E9EC; --tx2: #8A919A; --tx3: #4A5158;
+    --ico: 22px;
+    --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  [data-theme="warm"] {
+    --bg: #F4EFE4; --bg1: #ECE6D7; --bg2: #E3DBC7; --line: #D3C9B2;
+    --acc: #9A6200; --warn: #B4430F; --err: #C23327;
+    --tx: #29251D; --tx2: #6E6654; --tx3: #A79D86;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; }
+  body {
+    background: var(--bg); color: var(--tx); font-family: var(--font-mono); font-size: 12px;
+    background-image:
+      linear-gradient(color-mix(in srgb, var(--line) 32%, transparent) 1px, transparent 1px),
+      linear-gradient(90deg, color-mix(in srgb, var(--line) 32%, transparent) 1px, transparent 1px);
+    background-size: 28px 28px;
+  }
+  header {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 14px;
+    padding: 12px 22px; border-bottom: 1px solid var(--line);
+    background: color-mix(in srgb, var(--bg) 92%, transparent);
+  }
+  .brand { display: flex; align-items: baseline; gap: 8px; }
+  .brand b { color: var(--acc); font-weight: 600; letter-spacing: .16em; font-size: 11px; }
+  .brand span { color: var(--tx3); font-size: 10px; }
+  .spacer { flex: 1; }
+  .group { display: flex; align-items: center; gap: 1px; }
+  .group > em { color: var(--tx3); font-style: normal; font-size: 9.5px; margin-right: 6px; letter-spacing: .08em; }
+  button {
+    font: inherit; font-size: 10.5px; color: var(--tx2); background: transparent;
+    border: 1px solid var(--line); padding: 3px 9px; cursor: pointer; transition: .16s;
+  }
+  button:hover { color: var(--acc); border-color: color-mix(in srgb, var(--acc) 60%, var(--line)); }
+  button.on { color: var(--acc); border-color: color-mix(in srgb, var(--acc) 55%, transparent); background: color-mix(in srgb, var(--acc) 10%, transparent); }
+
+  .intro { max-width: 1080px; margin: 0 auto; padding: 18px 22px 4px; color: var(--tx2); font-size: 11px; line-height: 1.9; }
+  .intro h1 { margin: 0 0 6px; font-size: 15px; letter-spacing: .1em; color: var(--tx); font-weight: 600; }
+  .intro u { text-decoration: none; color: var(--acc); }
+
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 14px 22px 40px; }
+  table { border-collapse: collapse; width: 100%; min-width: 760px; }
+  thead th {
+    background: var(--bg1); border: 1px solid var(--line);
+    padding: 9px 10px; text-align: left; vertical-align: top;
+  }
+  thead th .lib { font-size: 11.5px; color: var(--tx); letter-spacing: .04em; }
+  thead th .note { display: block; margin-top: 3px; font-size: 9.5px; color: var(--tx3); line-height: 1.6; }
+  thead th.corner { color: var(--tx3); font-size: 9.5px; letter-spacing: .12em; width: 168px; }
+
+  tbody td { border: 1px solid var(--line); padding: 0; }
+  tbody tr:hover td { background: color-mix(in srgb, var(--acc) 4%, transparent); }
+
+  tr.grp td {
+    background: var(--bg2); padding: 6px 10px;
+    font-size: 9.5px; letter-spacing: .16em; color: var(--acc);
+  }
+  tr.grp span { color: var(--tx3); letter-spacing: 0; margin-left: 10px; }
+
+  .sem { padding: 8px 10px; background: var(--bg1); }
+  .sem b { display: block; font-size: 11px; color: var(--tx2); font-weight: 500; }
+  .sem code { font-size: 9.5px; color: var(--tx3); }
+
+  td.slot { text-align: center; vertical-align: middle; height: 58px; }
+  .slot-in { display: inline-flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
+  .slot-in svg { width: var(--ico); height: var(--ico); stroke-width: 1.5; }
+  .slot-in i { font-size: var(--ico); line-height: 1; }
+
+  .missing .slot-in { position: relative; }
+  .missing .slot-in::after {
+    content: "缺"; position: absolute; right: 8px; top: 4px;
+    font-size: 8.5px; color: var(--err); border: 1px solid color-mix(in srgb, var(--err) 45%, transparent);
+    padding: 0 2px;
+  }
+
+  footer { max-width: 1080px; margin: 0 auto; padding: 0 22px 48px; color: var(--tx3); font-size: 10px; line-height: 2; }
+  footer .stat b { color: var(--acc); font-weight: 500; }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><b>ICON SET COMPARISON</b><span>// 全站图标选型 · 纯图标对照</span></div>
+  <div class="spacer"></div>
+  <div class="group" data-set="theme">
+    <em>主题</em>
+    <button data-v="dark" class="on">dark · 终端</button>
+    <button data-v="warm">warm · 纸面</button>
+  </div>
+  <div class="group" data-set="size">
+    <em>尺寸</em>
+    <button data-v="14">14 · 实际</button>
+    <button data-v="22" class="on">22</button>
+    <button data-v="32">32</button>
+  </div>
+</header>
+
+<section class="intro">
+  <h1>同一套语义，三种笔画</h1>
+  <p>
+    65 个语义，覆盖全站面板入口、增删改操作、状态反馈、内容互动与阅读导航。
+    每列只换图标库，不换语义；切到 <u>14px</u> 是界面里的真实尺寸，细节差异只在这个尺寸才成立。
+    右上角可切 <u>warm · 纸面</u>，那是站点第二套主题，细线条在暖底上的对比度同样要过关。
+  </p>
+</section>
+
+<div class="wrap">
+  <table>
+    <thead>
+      <tr>
+        <th class="corner">语义 / LIB</th>
+        <th><span class="lib">Lucide</span><span class="note">现状基线 · 1.5px 圆头 · 体量最轻</span></th>
+        <th><span class="lib">Tabler</span><span class="note">2px 方头 · 结构最硬 · 工业感强</span></th>
+        <th><span class="lib">Remix</span><span class="note">1px line · 最细 · 信息密度优先</span></th>
+      </tr>
+    </thead>
+    <tbody id="rows"></tbody>
+  </table>
+</div>
+
+<footer>
+  <div class="stat" id="stat"></div>
+  <div>// 缺 = 该库没有直观对应的图标，需要换名或改写语义；这类格子决定整套库的改造成本。</div>
+  <div>// 导航语义对应已有面板（模型管理 / AI 助手 / 执行历史 / … / GitHub），便于按面板直接比对。</div>
+</footer>
+
+<script src="https://unpkg.com/lucide@0.469.0/dist/umd/lucide.min.js"></script>
+<script>
+const DATA = [
+{
+"grp": "nav",
+"label": "NAV",
+"cn": "导航 · 面板入口",
+"rows": [
+[
+"box",
+"模型管理",
+[
+"box",
+"ti-box",
+"ri-box-3-line"
+]
+],
+[
+"bot",
+"AI 助手",
+[
+"bot",
+"ti-robot",
+"ri-robot-2-line"
+]
+],
+[
+"history",
+"执行历史",
+[
+"history",
+"ti-history",
+"ri-history-line"
+]
+],
+[
+"stats",
+"访问统计",
+[
+"bar-chart-3",
+"ti-chart-bar",
+"ri-bar-chart-line"
+]
+],
+[
+"database",
+"知识库",
+[
+"database",
+"ti-database",
+"ri-database-2-line"
+]
+],
+[
+"book",
+"博客/阅读",
+[
+"book-open",
+"ti-book",
+"ri-book-open-line"
+]
+],
+[
+"kanban",
+"项目管理",
+[
+"square-kanban",
+"ti-layout-kanban",
+"ri-kanban-view"
+]
+],
+[
+"code",
+"代码管理",
+[
+"code-xml",
+"ti-code",
+"ri-code-s-slash-line"
+]
+],
+[
+"calendar",
+"日程",
+[
+"calendar",
+"ti-calendar",
+"ri-calendar-line"
+]
+],
+[
+"mail",
+"邮件",
+[
+"mail",
+"ti-mail",
+"ri-mail-line"
+]
+],
+[
+"bell",
+"站内信",
+[
+"bell",
+"ti-bell",
+"ri-notification-3-line"
+]
+],
+[
+"briefcase",
+"商业化",
+[
+"briefcase",
+"ti-briefcase",
+"ri-briefcase-line"
+]
+],
+[
+"users",
+"客户",
+[
+"users",
+"ti-users",
+"ri-team-line"
+]
+],
+[
+"workflow",
+"流水线",
+[
+"workflow",
+"ti-sitemap",
+"ri-flow-chart"
+]
+],
+[
+"resume",
+"简历",
+[
+"file-user",
+"ti-id-badge-2",
+"ri-file-user-line"
+]
+],
+[
+"wrench",
+"百宝箱",
+[
+"wrench",
+"ti-tool",
+"ri-tools-line"
+]
+],
+[
+"blocks",
+"工具管理",
+[
+"blocks",
+"ti-apps",
+"ri-apps-2-line"
+]
+],
+[
+"github",
+"GitHub",
+[
+"github",
+"ti-brand-github",
+"ri-github-line"
+]
+]
+]
+},
+{
+"grp": "act",
+"label": "ACT",
+"cn": "操作 · 增删改与视图",
+"rows": [
+[
+"send",
+"发布/发送",
+[
+"send",
+"ti-send",
+"ri-send-plane-line"
+]
+],
+[
+"archive",
+"下架",
+[
+"archive",
+"ti-archive",
+"ri-archive-line"
+]
+],
+[
+"restore",
+"重新上架",
+[
+"rotate-ccw",
+"ti-arrow-back-up",
+"ri-arrow-go-back-line"
+]
+],
+[
+"trash",
+"删除",
+[
+"trash-2",
+"ti-trash",
+"ri-delete-bin-line"
+]
+],
+[
+"edit",
+"编辑",
+[
+"pen-line",
+"ti-pencil",
+"ri-edit-line"
+]
+],
+[
+"eye",
+"预览",
+[
+"eye",
+"ti-eye",
+"ri-eye-line"
+]
+],
+[
+"external",
+"外链",
+[
+"external-link",
+"ti-external-link",
+"ri-external-link-line"
+]
+],
+[
+"sort",
+"排序",
+[
+"arrow-up-down",
+"ti-arrows-sort",
+"ri-arrow-up-down-line"
+]
+],
+[
+"filter",
+"筛选",
+[
+"filter",
+"ti-filter",
+"ri-filter-3-line"
+]
+],
+[
+"search",
+"搜索",
+[
+"search",
+"ti-search",
+"ri-search-line"
+]
+],
+[
+"refresh",
+"刷新",
+[
+"refresh-cw",
+"ti-refresh",
+"ri-refresh-line"
+]
+],
+[
+"upload",
+"上传",
+[
+"upload",
+"ti-upload",
+"ri-upload-line"
+]
+],
+[
+"download",
+"下载",
+[
+"download",
+"ti-download",
+"ri-download-2-line"
+]
+],
+[
+"copy",
+"复制",
+[
+"copy",
+"ti-copy",
+"ri-file-copy-line"
+]
+],
+[
+"save",
+"保存",
+[
+"save",
+"ti-device-floppy",
+"ri-save-line"
+]
+],
+[
+"plus",
+"新建",
+[
+"plus",
+"ti-plus",
+"ri-add-line"
+]
+],
+[
+"close",
+"关闭",
+[
+"x",
+"ti-x",
+"ri-close-line"
+]
+],
+[
+"expand",
+"展开/折叠",
+[
+"chevron-down",
+"ti-chevron-down",
+"ri-arrow-down-s-line"
+]
+],
+[
+"fullscreen",
+"全屏",
+[
+"maximize-2",
+"ti-arrows-maximize",
+"ri-fullscreen-line"
+]
+],
+[
+"settings",
+"设置",
+[
+"settings",
+"ti-settings",
+"ri-settings-3-line"
+]
+],
+[
+"logout",
+"退出登录",
+[
+"log-out",
+"ti-logout",
+"ri-logout-box-line"
+]
+],
+[
+"user",
+"用户",
+[
+"user",
+"ti-user",
+"ri-user-line"
+]
+],
+[
+"lock",
+"权限",
+[
+"lock",
+"ti-lock",
+"ri-lock-line"
+]
+]
+]
+},
+{
+"grp": "state",
+"label": "STATE",
+"cn": "状态 · 反馈与加载",
+"rows": [
+[
+"check",
+"成功",
+[
+"check",
+"ti-check",
+"ri-check-line"
+]
+],
+[
+"alert",
+"警告",
+[
+"triangle-alert",
+"ti-alert-triangle",
+"ri-error-warning-line"
+]
+],
+[
+"error",
+"失败",
+[
+"circle-x",
+"ti-circle-x",
+"ri-close-circle-line"
+]
+],
+[
+"info",
+"提示",
+[
+"info",
+"ti-info-circle",
+"ri-information-line"
+]
+],
+[
+"loader",
+"加载中",
+[
+"loader",
+"ti-loader",
+"ri-loader-4-line"
+]
+]
+]
+},
+{
+"grp": "content",
+"label": "CONTENT",
+"cn": "内容 · 文档与互动",
+"rows": [
+[
+"doc",
+"文档",
+[
+"file-text",
+"ti-file-text",
+"ri-file-text-line"
+]
+],
+[
+"folder",
+"文件夹",
+[
+"folder",
+"ti-folder",
+"ri-folder-line"
+]
+],
+[
+"tag",
+"标签",
+[
+"tag",
+"ti-tag",
+"ri-price-tag-3-line"
+]
+],
+[
+"clock",
+"时间",
+[
+"clock",
+"ti-clock",
+"ri-time-line"
+]
+],
+[
+"comment",
+"评论",
+[
+"message-square",
+"ti-message-2",
+"ri-chat-3-line"
+]
+],
+[
+"reply",
+"回复 @人",
+[
+"reply",
+"ti-corner-up-left",
+"ri-reply-line"
+]
+],
+[
+"heart",
+"点赞",
+[
+"heart",
+"ti-heart",
+"ri-heart-line"
+]
+],
+[
+"star",
+"收藏",
+[
+"star",
+"ti-star",
+"ri-star-line"
+]
+],
+[
+"share",
+"分享",
+[
+"share-2",
+"ti-share-3",
+"ri-share-forward-line"
+]
+],
+[
+"link",
+"链接",
+[
+"link",
+"ti-link",
+"ri-link"
+]
+],
+[
+"image",
+"图片",
+[
+"image",
+"ti-photo",
+"ri-image-line"
+]
+],
+[
+"paperclip",
+"附件",
+[
+"paperclip",
+"ti-paperclip",
+"ri-attachment-line"
+]
+],
+[
+"table",
+"表格",
+[
+"table",
+"ti-table",
+"ri-table-line"
+]
+],
+[
+"codeblock",
+"代码块",
+[
+"square-code",
+"ti-code",
+"ri-code-box-line"
+]
+]
+]
+},
+{
+"grp": "read",
+"label": "READ",
+"cn": "阅读 · 目录与翻页",
+"rows": [
+[
+"toc",
+"目录",
+[
+"list",
+"ti-list",
+"ri-list-unordered"
+]
+],
+[
+"back",
+"返回",
+[
+"arrow-left",
+"ti-arrow-left",
+"ri-arrow-left-line"
+]
+],
+[
+"prev",
+"上一篇",
+[
+"chevron-left",
+"ti-chevron-left",
+"ri-arrow-left-s-line"
+]
+],
+[
+"next",
+"下一篇",
+[
+"chevron-right",
+"ti-chevron-right",
+"ri-arrow-right-s-line"
+]
+],
+[
+"newspaper",
+"博客面板",
+[
+"newspaper",
+"ti-news",
+"ri-newspaper-line"
+]
+]
+]
+}
+];
+const LIBS = [
+  { id: "lucide", kind: "lucide", idx: 0, prefix: "" },
+  { id: "tabler", kind: "font", idx: 1, prefix: "ti ", font: "tabler-icons" },
+  { id: "remix",  kind: "font", idx: 2, prefix: "", font: "remixicon" },
+];
+
+const tbody = document.getElementById("rows");
+for (const g of DATA) {
+  const gt = document.createElement("tr");
+  gt.className = "grp";
+  gt.innerHTML = `<td colspan="4">${g.label} · ${g.cn}<span>${g.rows.length}</span></td>`;
+  tbody.appendChild(gt);
+
+  for (const [key, cn, names] of g.rows) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td class="sem"><b>${cn}</b><code>${key}</code></td>`;
+    for (const lib of LIBS) {
+      const td = document.createElement("td");
+      td.className = "slot";
+      td.dataset.lib = lib.id;
+      const cls = names[lib.idx];
+      td.innerHTML = `<span class="slot-in">${
+        lib.kind === "lucide" ? `<i data-lucide="${cls}"></i>` : `<i class="${lib.prefix}${cls}"></i>`
+      }</span>`;
+      tr.appendChild(td);
+    }
+    tbody.appendChild(tr);
+  }
+}
+
+if (window.lucide) window.lucide.createIcons();
+
+function audit() {
+  let missing = 0;
+  document.querySelectorAll("td.slot").forEach((td) => {
+    if (td.dataset.lib === "lucide") {
+      if (!td.querySelector("svg")) { td.classList.add("missing"); missing++; }
+      return;
+    }
+    const i = td.querySelector("i");
+    const c = i && getComputedStyle(i, "::before").content;
+    if (!c || c === "none" || c === "normal" || c === '""') { td.classList.add("missing"); missing++; }
+  });
+  const total = document.querySelectorAll("td.slot").length;
+  /* 字形内容存在但字体未加载时会整列显示方块，单独再查一遍 webfont */
+  const fontBad = LIBS.filter((l) => l.font && !document.fonts.check(`16px "${l.font}"`)).map((l) => l.id);
+  document.getElementById("stat").innerHTML =
+    `共 <b>${total}</b> 格映射，缺失 <b>${missing}</b> 格 · <b>${DATA.reduce((n, g) => n + g.rows.length, 0)}</b> 个语义 · <b>${LIBS.length}</b> 套候选` +
+    (fontBad.length ? ` · <b style="color:var(--err)">字体未加载：${fontBad.join(" / ")}</b>` : "");
+}
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(audit);
+setTimeout(audit, 1800);
+
+document.querySelectorAll(".group").forEach((g) => {
+  g.addEventListener("click", (e) => {
+    const btn = e.target.closest("button");
+    if (!btn) return;
+    g.querySelectorAll("button").forEach((b) => b.classList.toggle("on", b === btn));
+    if (g.dataset.set === "theme") document.documentElement.dataset.theme = btn.dataset.v;
+    else document.documentElement.style.setProperty("--ico", btn.dataset.v + "px");
+  });
+});
+</script>
+</body>
+</html>

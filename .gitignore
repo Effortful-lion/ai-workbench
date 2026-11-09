@@ -6,7 +6,10 @@ dist/
 *.tsbuildinfo
 
 # Runtime data & secrets
+# 只忽略、不删除：根 data/（SQLite 等）与各服务本地数据集（services/*/data，如 lightrag 向量库）
+# 需要提交种子数据时用 git add -f 显式放行
 data/
+services/*/data/
 .env
 .env.*
 !.env.example

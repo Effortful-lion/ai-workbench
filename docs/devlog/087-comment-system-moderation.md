@@ -54,6 +54,7 @@
 - 评论区（公开页）：两层树（一级 + 压平回复）、`回复 @某人`、楼层号、分页「加载更多」、待审提示「已提交，待作者审核后公开」、未登录显示「去登录」
 - 博客面板：新增「评论审核」tab（待审计数徽标），文章 tab 保持只读
 - 阅读页（面板内嵌）：只展示已通过评论
+- **审核入口可发现性**（补）：公开页 `/b/:username` 由博主本人浏览时，列表页与阅读页评论区上方显示「N 条待审核 · 公开页不可见 / 去审核」，点击整页跳 `/?tab=moderation#/p=blog`；`BlogPanel` 读取 `?tab=` 落到审核 tab 并清理 search。原因是公开页按设计只返回 `approved`，博主在公开页看不到待审、也找不到按钮
 
 ## 五、验证
 
@@ -61,11 +62,52 @@
 - 读者普通评论 → `approved`；回复 → `depth=1, parentId==rootId, replyToUsername=admin`
 - 敏感词评论 → `pending`；审核队列可见；通过后通知评论者（DB 校验 `blog|你的评论已通过审核`）
 - 10s 内二次评论 → `发言过快，请稍后再试`
-- 分页接口返回 `{threads,total,page,pageSize}`，无头渲染显示「评论 · N」与嵌套结构
-- 测试数据已清理（保留博主一条示例评论）
+- 分页接口返回 `{threads,total,commentTotal,page,pageSize}`，无头渲染显示「评论 · N」与嵌套结构
 
-## 六、遗留
+**端到端实测（真实 HTTP，admin + tester 双账号连发 6 条）**
+
+| 步骤 | 结果 |
+|---|---|
+| 博主一级评论 | `approved` `depth=0` `rootId==id` |
+| 读者一级评论 | `approved` `depth=0` |
+| 读者回复博主 | `approved` `depth=1` `parentId=root` `replyTo=admin` |
+| 博主回复该回复（三级尝试） | **压平**为 `depth=1` `parentId=root` `replyTo=tester` |
+| 读者再回复（四级尝试） | **仍压平**为 `depth=1` `parentId=root` `replyTo=admin` |
+| 敏感词「加微信 代开发票」 | `pending`，公开页 `total` 不含它，审核队列可见，`PATCH approved` 后 `total+1` |
+
+- 两层树渲染下 `admin` 楼层 `children=3`，`replyTo` 链 `tester→admin / admin→tester / tester→admin` 正确
+
+## 六、复测：站内信出现「三四层」，公开页却只见两条
+
+**现象**：站内信有 15 条 blog 通知（含「四级尝试」回复），公开页评论区只显示 2 条。
+
+**排查结论**：
+
+1. **通知不随评论删除**：`notifications` 与评论无级联关系，历史测试评论删了，通知仍在 → 站内信里的三四层是**上一轮残留**。已按 `type='blog'` 清空后复测。
+2. **渲染没有漏**：干净重跑 5 条（2 一级 + A 楼层下 3 条回复），真实 HTTP 与浏览器截图一致，`回复 @admin / @tester` 全部正确。
+3. **真问题是计数语义不一致**：文章头 `commentCount` 数全部 `approved`（含回复），评论区标题 `评论 · N` 用的却是 `total`（一级楼层数）→ 5 条只显示 2，造成「只看到两条」的错觉。
+
+**修复**：
+
+- `BlogCommentPageDto` 增 `commentTotal`（全部 `approved` 条数）；`total` 收窄语义为「一级楼层数」，仅用于分页
+- `CommentThread` 标题改用 `commentTotal`，分页「加载更多」仍按 `total` 判断（否则回复数会让它误判还有下一页）
+- `BlogPanel` 内存组装的 page 同步补 `commentTotal`
+
+**复测结果（数据保留供验收）**：
+
+| 位置 | 内容 | 结果 |
+|---|---|---|
+| 楼层 1 | tester「【一级B】」 | 无回复 |
+| 楼层 2 | admin「【一级A】」 | 3 条回复 |
+| 回复 | tester「【二级】」 | `depth=1` `replyTo=admin` |
+| 回复 | admin「【三级尝试】」 | 压平 `depth=1` `replyTo=tester` |
+| 回复 | tester「【四级尝试】」 | 压平 `depth=1` `replyTo=admin` |
+
+接口：`total=2`（楼层）、`commentTotal=5`；页面标题显示「评论 · 5」，与文章头一致。
+
+## 七、遗留
 
 - 敏感词表/阈值目前是常量，后续可挪到设置
 - 评论审核暂无「批量通过」「举报」入口
+- 待审提醒只有公开页提示条 + 面板 tab 徽标，没有站内信/常驻角标；博主不主动进博客就发现不了待审
 - 若开启多实例部署，再评估 Redis 分页缓存与写队列（模型无需改）

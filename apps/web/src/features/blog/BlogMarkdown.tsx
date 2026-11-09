@@ -4,28 +4,28 @@ import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import { splitSections } from "./blogUtils";
 
-/** 阅读版心 Markdown：与聊天用的 MarkdownText 分开，避免影响会话观感 */
+/**
+ * 阅读版心 Markdown：与聊天用的 MarkdownText 分开，避免影响会话观感。
+ * 基线约束：各级标题与段落共用同一条左边缘（不加 border-l / 左缩进），
+ * 间距只用 16 / 24 / 32 / 48，章节之间靠留白而非线条区分。
+ */
 const components: Components = {
-  p: ({ children }) => <p className="mb-[18px]">{children}</p>,
+  p: ({ children }) => <p className="mb-6">{children}</p>,
   h1: ({ children }) => (
-    <h1 className="mb-3 mt-8 border-l-2 border-acc pl-3 text-[19px] font-semibold leading-snug text-tx first:mt-0">
-      {children}
-    </h1>
+    <h1 className="mb-4 text-[20px] font-semibold leading-snug text-tx">{children}</h1>
   ),
   h2: ({ children }) => (
-    <h2 className="mb-3.5 mt-9 border-l-2 border-acc pl-3 text-[17px] font-semibold leading-snug text-tx first:mt-0">
-      {children}
-    </h2>
+    <h2 className="mb-4 text-[18px] font-semibold leading-snug text-tx">{children}</h2>
   ),
   h3: ({ children }) => (
-    <h3 className="mb-2.5 mt-6 text-[15px] font-semibold text-tx">{children}</h3>
+    <h3 className="mb-4 text-[15.5px] font-semibold leading-snug text-tx">{children}</h3>
   ),
   h4: ({ children }) => (
-    <h4 className="mb-2 mt-4 text-[14px] font-semibold text-tx2">{children}</h4>
+    <h4 className="mb-4 mt-6 text-[14px] font-semibold text-tx2">{children}</h4>
   ),
-  ul: ({ children }) => <ul className="mb-[18px] list-disc pl-6">{children}</ul>,
-  ol: ({ children }) => <ol className="mb-[18px] list-decimal pl-6">{children}</ol>,
-  li: ({ children }) => <li className="my-1">{children}</li>,
+  ul: ({ children }) => <ul className="mb-6 list-disc pl-6">{children}</ul>,
+  ol: ({ children }) => <ol className="mb-6 list-decimal pl-6">{children}</ol>,
+  li: ({ children }) => <li className="mt-2 first:mt-0">{children}</li>,
   strong: ({ children }) => <strong className="font-semibold text-tx">{children}</strong>,
   em: ({ children }) => <em className="italic text-tx2">{children}</em>,
   del: ({ children }) => <del className="text-tx3 line-through">{children}</del>,
@@ -39,14 +39,14 @@ const components: Components = {
       {children}
     </a>
   ),
-  hr: () => <hr className="my-7 border-line" />,
+  hr: () => <hr className="my-8 border-line" />,
   blockquote: ({ children }) => (
-    <blockquote className="my-5 border-l-2 border-line pl-4 text-tx2 [&_p]:mb-2 [&_p:last-child]:mb-0">
+    <blockquote className="my-6 border-l-2 border-line pl-6 text-tx2 [&_p]:mb-4 [&_p:last-child]:mb-0">
       {children}
     </blockquote>
   ),
   pre: ({ children }) => (
-    <pre className="my-5 overflow-x-auto rounded border border-line bg-bg1 px-4 py-3 font-mono text-[12.5px] leading-relaxed [&_code]:border-0 [&_code]:bg-transparent [&_code]:p-0 [&_code]:text-tx2">
+    <pre className="my-6 overflow-x-auto rounded border border-line bg-bg1 p-4 font-mono text-[12.5px] leading-relaxed [&_code]:border-0 [&_code]:bg-transparent [&_code]:p-0 [&_code]:text-tx2">
       {children}
     </pre>
   ),
@@ -59,22 +59,22 @@ const components: Components = {
     );
   },
   table: ({ children }) => (
-    <div className="my-5 overflow-x-auto rounded border border-line">
+    <div className="my-6 overflow-x-auto rounded border border-line">
       <table className="w-full border-collapse text-[12.5px]">{children}</table>
     </div>
   ),
   thead: ({ children }) => <thead className="bg-bg1">{children}</thead>,
   th: ({ children }) => (
-    <th className="border-b border-line px-3 py-1.5 text-left font-medium text-tx">{children}</th>
+    <th className="border-b border-line px-4 py-2 text-left font-medium text-tx">{children}</th>
   ),
   td: ({ children }) => (
-    <td className="border-b border-line/60 px-3 py-1.5 align-top text-tx2">{children}</td>
+    <td className="border-b border-line/60 px-4 py-2 align-top text-tx2">{children}</td>
   ),
   img: ({ src, alt }) => (
     <img
       src={typeof src === "string" ? src : undefined}
       alt={alt ?? ""}
-      className="my-5 max-w-full rounded border border-line"
+      className="my-6 max-w-full rounded border border-line"
     />
   ),
 };
@@ -83,9 +83,9 @@ const components: Components = {
 export default function BlogMarkdown({ text }: { text: string }) {
   const sections = splitSections(text);
   return (
-    <div className="break-words text-[15px] leading-[2.05] text-tx2">
+    <div className="break-words text-[15px] leading-[2.05] text-tx2 [&>section+section]:mt-8">
       {sections.map((s) => (
-        <section key={s.id} id={s.id} className="scroll-mt-6">
+        <section key={s.id} id={s.id} className="scroll-mt-4">
           <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]} components={components}>
             {s.md}
           </ReactMarkdown>

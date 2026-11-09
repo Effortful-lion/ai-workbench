@@ -115,8 +115,10 @@ export interface BlogCommentThreadDto {
 /** 分页：先一级分页，再按 rootId 批量取子评论 */
 export interface BlogCommentPageDto {
   threads: BlogCommentThreadDto[];
-  /** 一级评论总数（不含回复） */
+  /** 一级楼层总数（不含回复，分页「加载更多」依据） */
   total: number;
+  /** 已通过评论总条数（含回复，仅用于展示「评论 · N」） */
+  commentTotal: number;
   page: number;
   pageSize: number;
 }
