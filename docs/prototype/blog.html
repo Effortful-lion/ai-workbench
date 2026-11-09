@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI-WORKBENCH · BLOG · 完整交付（台账 + 分类 + 排序 + 阅读页 + 评论）</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,700;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/misans@4.0.0/lib/Normal/MiSans-Regular.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/misans@4.0.0/lib/Normal/MiSans-Medium.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/misans@4.0.0/lib/Normal/MiSans-Semibold.min.css">
+<style>
+/* ============ tokens（与工作台同源） ============ */
+:root{
+  --bg:#0B0D10; --bg1:#12151A; --bg2:#181C22; --line:#23282F; --line2:#2E3942;
+  --acc:#00E59B; --warn:#FFB000; --err:#FF5F56;
+  --tx:#E6E9EC; --tx2:#8A919A; --tx3:#4A5158; --body:#C2C8CF;
+  --a08:#00E59B08; --a0d:#00E59B0D; --a12:#00E59B12; --a22:#00E59B22;
+  --a2e:#00E59B2E; --a33:#00E59B33; --a55:#00E59B55;
+  --scroll:#23282F; --scroll-h:#2E343D; --dash:#1B2026; --hov:#ffffff05;
+  --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+  --sans:'MiSans','PingFang SC','Noto Sans SC','Microsoft YaHei',sans-serif;
+  --ease:cubic-bezier(.2,.8,.2,1);
+  --glow:0 0 12px var(--a22);
+}
+body[data-theme="warm"]{
+  --bg:#F4EFE4; --bg1:#ECE6D7; --bg2:#E3DBC7; --line:#D3C9B2; --line2:#C4B898;
+  --acc:#9A6200; --warn:#B4430F; --err:#C23327;
+  --tx:#29251D; --tx2:#6E6654; --tx3:#A79D86; --body:#3F3829;
+  --a08:#9A620008; --a0d:#9A62000D; --a12:#9A620012; --a22:#9A620022;
+  --a2e:#9A62002E; --a33:#9A620033; --a55:#9A620055;
+  --scroll:#CDC3AB; --scroll-h:#B8AC8F; --dash:#D8CFBB; --hov:#3C32200A;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+::selection{background:var(--a2e);color:var(--tx)}
+html,body{height:100%}
+body{background:var(--bg);color:var(--tx);font-family:var(--sans);font-size:14px;display:flex;flex-direction:column;overflow:hidden}
+body::before{
+  content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
+  background-image:
+    linear-gradient(rgba(255,255,255,.028) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(255,255,255,.028) 1px,transparent 1px);
+  background-size:32px 32px;
+}
+body[data-theme="warm"]::before{
+  background-image:
+    linear-gradient(rgba(90,70,30,.045) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(90,70,30,.045) 1px,transparent 1px);
+}
+body::after{
+  content:'';position:fixed;inset:0;z-index:80;pointer-events:none;opacity:.45;mix-blend-mode:overlay;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.05'/%3E%3C/svg%3E");
+}
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-thumb{background:var(--scroll);border-radius:4px}
+::-webkit-scrollbar-thumb:hover{background:var(--scroll-h)}
+::-webkit-scrollbar-track{background:transparent}
+button{font-family:inherit;background:none;border:none;color:inherit;cursor:pointer}
+input,textarea{font-family:inherit;background:none;border:none;outline:none;color:inherit}
+
+/* ============ topbar ============ */
+.top{
+  height:50px;flex:none;display:flex;align-items:center;justify-content:space-between;
+  padding:0 20px;border-bottom:1px solid var(--line);position:relative;z-index:10;background:var(--bg);
+}
+.brand{display:flex;align-items:center;gap:10px;font-family:var(--mono);font-size:12px;letter-spacing:.1em;color:var(--tx);cursor:pointer}
+.brand .mk{width:7px;height:7px;background:var(--acc);display:block}
+.brand small{color:var(--tx3);letter-spacing:.04em;font-size:10.5px}
+.top-r{display:flex;align-items:center;gap:14px;font-family:var(--mono);font-size:10.5px;color:var(--tx3)}
+.top-r b{color:var(--tx2);font-weight:400}
+.tbtn{border:1px solid var(--line);border-radius:3px;padding:3px 8px;font-family:var(--mono);font-size:10.5px;color:var(--tx3);transition:.15s}
+.tbtn:hover{border-color:var(--acc);color:var(--acc)}
+
+/* ============ 列表页（测绘台账） ============ */
+#listView{flex:1;min-height:0;display:flex;flex-direction:column;position:relative;z-index:4}
+.mhead{flex:none;padding:20px 28px 12px}
+.mhead h1{font-family:var(--mono);font-size:15px;letter-spacing:.16em;color:var(--tx);font-weight:500}
+.mhead h1 i{font-style:normal;color:var(--acc)}
+.mhead .sub{margin-top:6px;font-size:12px;color:var(--tx2);max-width:640px;line-height:1.7}
+/* 分类 + 排序：极简等宽词，无传统控件 */
+.mbar{flex:none;display:flex;align-items:center;gap:4px;padding:0 28px 12px;font-family:var(--mono);font-size:10.5px;flex-wrap:wrap}
+.cat{padding:3px 9px;color:var(--tx3);border-radius:3px;transition:.15s;letter-spacing:.04em}
+.cat:hover{color:var(--acc)}
+.cat.on{color:var(--acc);background:var(--a0d)}
+.mbar .cnt{color:var(--tx3);margin-left:6px}
+.mbar .sp{flex:1}
+.sbtn{color:var(--tx3);padding:3px 9px;border-radius:3px;transition:.15s}
+.sbtn:hover{color:var(--acc)}
+.sbtn b{color:var(--tx2);font-weight:400}
+#ledger{flex:1;min-height:0;overflow-y:auto;margin:0 28px;border-top:1px solid var(--line)}
+.row{border-bottom:1px solid var(--line);cursor:pointer;transition:background .2s,opacity .25s;position:relative}
+.row:hover{background:var(--hov)}
+.row.open{background:var(--bg1);box-shadow:inset 2px 0 0 var(--acc)}
+.row.hidden{display:none}
+.row-h{
+  display:grid;grid-template-columns:58px minmax(0,1fr) auto 120px 58px 14px;
+  gap:16px;align-items:center;height:46px;padding:0 18px;
+}
+.r-no{font-family:var(--mono);font-size:10px;color:var(--tx3);letter-spacing:.1em;transition:color .2s}
+.row:hover .r-no,.row.open .r-no{color:var(--acc)}
+.r-title{font-size:13.5px;color:var(--tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:color .15s;font-weight:500}
+.row:hover .r-title{color:var(--acc)}
+.r-tags{font-family:var(--mono);font-size:9.5px;color:var(--tx3);letter-spacing:.05em}
+.r-tick-wrap{height:3px;background:var(--bg2);border-radius:1px;overflow:hidden}
+.r-tick{height:100%;background:var(--line2);border-radius:1px;transition:background .2s}
+.row:hover .r-tick,.row.open .r-tick{background:var(--acc)}
+.r-date{font-family:var(--mono);font-size:9.5px;color:var(--tx3);text-align:right}
+.r-ind{font-family:var(--mono);font-size:9px;color:var(--tx3);opacity:0;transition:opacity .2s}
+.row.open .r-ind{opacity:1;color:var(--acc)}
+.row-b{max-height:0;overflow:hidden;opacity:0;transition:max-height .26s var(--ease),opacity .2s .06s}
+.row.open .row-b{max-height:220px;opacity:1}
+.r-inner{padding:2px 18px 16px 92px;display:flex;gap:22px;align-items:flex-start}
+.r-sum{flex:1;min-width:0;font-size:12.5px;line-height:1.85;color:var(--body)}
+.r-sum .k{font-family:var(--mono);font-size:9.5px;color:var(--acc);letter-spacing:.06em;display:block;margin-bottom:5px}
+.r-cmt{font-family:var(--mono);font-size:9.5px;color:var(--tx3)}
+.r-more{flex:none;border:1px solid var(--line2);border-radius:3px;padding:5px 12px;font-family:var(--mono);font-size:10.5px;color:var(--tx2);transition:.15s;margin-top:2px}
+.r-more:hover{border-color:var(--acc);color:var(--acc)}
+.empty-tip{padding:40px 18px;font-family:var(--mono);font-size:11px;color:var(--tx3)}
+.foot{
+  height:34px;flex:none;display:flex;align-items:center;gap:18px;padding:0 28px;
+  border-top:1px solid var(--line);font-family:var(--mono);font-size:10px;color:var(--tx3);background:var(--bg);position:relative;z-index:10;
+}
+.foot .live{color:var(--acc)}
+.foot .r{margin-left:auto}
+
+/* ============ 阅读页（FLIP 铺满全屏） ============ */
+#reader{position:fixed;inset:0;z-index:100;pointer-events:none;display:none}
+#reader.active{display:block;pointer-events:auto}
+#readerMask{position:absolute;inset:0;background:var(--bg);opacity:0;transition:opacity .3s}
+#reader.active #readerMask{opacity:1}
+#readerPanel{
+  position:absolute;background:var(--bg);display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 80px rgba(0,0,0,.5);
+}
+.rp-head{flex:none;display:flex;align-items:center;gap:14px;padding:0 24px;height:50px;border-bottom:1px solid var(--line);background:var(--bg);font-family:var(--mono);font-size:10.5px;color:var(--tx3)}
+.rp-back{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:10.5px;color:var(--tx2);transition:.15s}
+.rp-back:hover{color:var(--acc)}
+.rp-head .sp{flex:1}
+.rp-scroll{flex:1;min-height:0;overflow-y:auto}
+.art-wrap{max-width:1020px;margin:0 auto;padding:44px 24px 24px;display:grid;grid-template-columns:190px minmax(0,680px);gap:44px;justify-content:center;align-items:start}
+/* 左侧目录 */
+.toc{position:sticky;top:0;max-height:calc(100vh - 160px);overflow-y:auto;font-family:var(--mono)}
+.toc .t-lab{font-size:9.5px;color:var(--tx3);letter-spacing:.1em;margin-bottom:10px}
+.toc a{display:block;font-size:11px;color:var(--tx3);padding:5px 0 5px 12px;border-left:1px solid var(--line);text-decoration:none;line-height:1.5;transition:color .15s,border-color .15s;word-break:break-all}
+.toc a:hover{color:var(--tx2)}
+.toc a.on{color:var(--acc);border-left-color:var(--acc)}
+/* 文章版心 */
+.article h2{font-size:24px;font-weight:600;color:var(--tx);line-height:1.6;letter-spacing:.01em}
+.article .rp-meta{margin-top:14px;display:flex;flex-wrap:wrap;align-items:center;gap:14px;font-family:var(--mono);font-size:10.5px;color:var(--tx3)}
+.article .rp-meta .tags{color:var(--acc);letter-spacing:.05em}
+.article .hr{margin:22px 0 26px;border:none;height:1px;background:linear-gradient(90deg,var(--acc),var(--line) 30%)}
+.article .kicker{font-family:var(--mono);font-size:10.5px;color:var(--acc);letter-spacing:.08em;margin-bottom:12px}
+.article h3{font-size:16.5px;font-weight:600;color:var(--tx);margin:30px 0 12px;padding-left:12px;border-left:2px solid var(--acc);line-height:1.5}
+.article p{font-size:15px;line-height:2.05;color:var(--body);margin-bottom:18px}
+/* 上下篇 */
+.rp-nav{max-width:1020px;margin:0 auto;padding:8px 24px 56px;display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.art-wrap + .rp-nav,.rp-nav.solo{max-width:768px}
+.rp-nav button{border:1px solid var(--line);border-radius:4px;padding:12px 16px;text-align:left;transition:.15s;min-width:0}
+.rp-nav button:hover{border-color:var(--acc);background:var(--a0d)}
+.rp-nav button.nx{text-align:right}
+.rp-nav .lab{display:block;font-family:var(--mono);font-size:9.5px;color:var(--tx3);letter-spacing:.08em;margin-bottom:5px}
+.rp-nav .ti{display:block;font-size:12.5px;color:var(--tx2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rp-nav button:hover .ti{color:var(--acc)}
+.rp-foot{flex:none;border-top:1px solid var(--line);padding:8px 16px;font-family:var(--mono);font-size:10px;color:var(--tx3);text-align:center}
+
+/* ============ 评论（文章 + 评论 = 博客两大主体之一） ============ */
+.cmts{max-width:680px;margin:0 auto;padding:0 24px 72px}
+.cmts .c-lab{font-family:var(--mono);font-size:11px;color:var(--tx2);letter-spacing:.08em;padding-bottom:12px;border-bottom:1px solid var(--line)}
+.cmt{display:flex;gap:12px;padding:16px 0;border-bottom:1px dashed var(--dash)}
+.c-ava{flex:none;width:30px;height:30px;border:1px solid var(--line2);border-radius:3px;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:11px;color:var(--acc);background:var(--a08)}
+.c-main{flex:1;min-width:0}
+.c-h{display:flex;align-items:baseline;gap:10px;font-family:var(--mono);font-size:10px;color:var(--tx3)}
+.c-h .n{color:var(--tx2);font-size:11px}
+.c-h .fl{margin-left:auto}
+.c-t{margin-top:6px;font-size:13px;line-height:1.8;color:var(--body);white-space:pre-wrap}
+.c-act{margin-top:6px;font-family:var(--mono);font-size:10px;color:var(--tx3)}
+.c-act button{color:var(--tx3);transition:.15s}
+.c-act button:hover{color:var(--acc)}
+.c-reply{margin-top:10px;border-left:1px solid var(--line);padding-left:12px}
+.cmt.pend{opacity:.55}
+.c-form{margin-top:20px;border:1px dashed var(--line);border-radius:4px;padding:14px 16px}
+.c-form .f-row{display:flex;align-items:center;gap:10px;font-size:12.5px}
+.c-form .pfx{font-family:var(--mono);font-size:10.5px;color:var(--acc)}
+.c-form input{flex:none;width:130px;font-size:12.5px;border-bottom:1px solid var(--line);padding:2px 0}
+.c-form input:focus{border-bottom-color:var(--acc)}
+.c-form textarea{width:100%;margin-top:10px;font-size:13px;line-height:1.7;resize:vertical;min-height:56px}
+.c-form .f-foot{display:flex;align-items:center;gap:12px;margin-top:8px}
+.c-form .f-hint{font-family:var(--mono);font-size:9.5px;color:var(--tx3)}
+.c-form .f-sub{margin-left:auto;border:1px solid var(--line2);border-radius:3px;padding:4px 12px;font-family:var(--mono);font-size:10.5px;color:var(--tx2);transition:.15s}
+.c-form .f-sub:hover{border-color:var(--acc);color:var(--acc)}
+
+/* ============ 窄屏 ============ */
+@media (max-width:1020px){.art-wrap{grid-template-columns:minmax(0,1fr);padding-top:28px}.toc{position:static;max-height:none;margin-bottom:8px;column-count:2;column-gap:24px}.rp-nav{max-width:none}.cmts{padding-bottom:56px}}
+@media (max-width:900px){
+  .row-h{grid-template-columns:44px minmax(0,1fr) 52px 14px;gap:10px}
+  .r-tags,.r-tick-wrap{display:none}
+  .r-inner{padding-left:70px}
+  #ledger{margin:0 16px}.mhead,.mbar{padding-left:16px;padding-right:16px}.mbar .cnt{display:none}
+}
+</style>
+</head>
+<body>
+  <header class="top">
+    <div class="brand" id="brandHome">
+      <span class="mk"></span>
+      AI-WORKBENCH <small>/ blog</small>
+    </div>
+    <div class="top-r">
+      <span>文章 <b>14</b> · 分类 <b>4</b></span>
+      <button class="tbtn" id="themeBtn">◐ 换色</button>
+    </div>
+  </header>
+
+  <!-- ============ 视图一：台账列表 ============ -->
+  <main id="listView">
+    <div class="mhead">
+      <h1>一本<i>台账</i>，而非一面墙</h1>
+      <div class="sub">所有文章排成一列精密台账：每行 = 编号 + 正向标题 + 分类 + 字数刻度 + 日期，按阅读习惯从左到右扫读。悬停某行缓缓拉开露出摘要；点击即铺开为深度阅读页。秩序交给 1px 细线，变化只留一种。</div>
+    </div>
+    <div class="mbar" id="catBar">
+      <span class="cnt" id="catCnt"></span>
+      <span class="sp"></span>
+      <button class="sbtn" id="sortBtn" title="切换排序">⇅ <b id="sortLab">最新</b></button>
+    </div>
+    <main id="ledger"></main>
+  </main>
+
+  <footer class="foot">
+    <span class="live">● BLOG ONLINE</span>
+    <span>台账 46px/行 · 悬停展开 · FLIP 阅读页</span>
+    <span class="r">hash 路由 · 浏览器返回可用</span>
+  </footer>
+
+  <!-- ============ 视图二：深度阅读页（含左侧目录 + 评论） ============ -->
+  <div id="reader">
+    <div id="readerMask"></div>
+    <div id="readerPanel">
+      <div class="rp-head">
+        <button class="rp-back" id="rpBack">◄ 返回台账</button>
+        <span id="rpCrumb">ledger://blog/…</span>
+        <span class="sp"></span>
+        <span id="rpHint">Esc 返回 · 浏览器 ← 亦可</span>
+      </div>
+      <div class="rp-scroll" id="rpScroll">
+        <div class="art-wrap">
+          <nav class="toc" id="toc"><div class="t-lab">// 目录</div></nav>
+          <article class="article" id="rpArticle"></article>
+        </div>
+        <nav class="rp-nav">
+          <button id="rpPrev"><span class="lab">◄ 上一篇（更早）</span><span class="ti" id="rpPrevT">—</span></button>
+          <button id="rpNext" class="nx"><span class="lab">下一篇（更新）►</span><span class="ti" id="rpNextT">—</span></button>
+        </nav>
+        <section class="cmts" id="cmts"></section>
+      </div>
+      <div class="rp-foot">AI-WORKBENCH · 独立阅读页 · 左侧目录随滚动高亮 · hash 路由可直达</div>
+    </div>
+  </div>
+
+<script>
+/* ============ 数据：cat=分类 w=字数权重 secs=带小节正文 ============ */
+const CATS = ["#全部", "#知识库", "#Agent", "#管道", "#随笔"];
+const POSTS = [
+  { id:"001", cat:"#随笔", t:"把方格纸底纹变成坐标系：这篇博客就是这样画的", w:2, tags:["#随笔"], date:"2026.11",
+    sum:"装饰性网格终于获得了空间语义。",
+    secs:[
+      {h:"为什么底纹不该只是背景",ps:["工作台界面上一直铺着一层 32px 的方格纸底纹，它只是安静地当背景。这一版把它升级成坐标系本体：横轴是思考的演进，纵轴是抽象度，每一篇文章落在网格的交叉点上。"]},
+      {h:"探针与读数",ps:["当你移动鼠标，探针读数告诉你此刻凝视的是思考历程的哪个象限。博客不再是一摞等待被翻的卡片，而是一张正在通电的图纸。"]}]},
+  { id:"002", cat:"#随笔", t:"为什么我不给博客做筛选器和排序控件", w:1, tags:["#随笔"], date:"2026.10",
+    sum:"控件是编辑器时代的遗迹，筛选是作者对自己分类能力的自白。",
+    secs:[
+      {h:"控件的遗迹",ps:["传统博客页脚总挂着标签云和排序下拉，这默认了读者需要在一堆平权列表里自己找路。但内容之间的权重差异本来就存在——一篇三个月打磨的长文和一篇十分钟的热修记录不该长得一样大。"]},
+      {h:"分类应该长什么样",ps:["分类保留，但退化成页头一行等宽词：点谁谁留下，其余安静退场，不刷新不弹层。分类是导航，不是表单。"]}]},
+  { id:"003", cat:"#随笔", t:"终端风的本质是密度，不是怀旧", w:2, tags:["#随笔"], date:"2026.10",
+    sum:"等宽字体是纪律的外显。",
+    secs:[
+      {h:"被滥用的皮肤",ps:["终端审美被滥用成绿色字加扫描线的皮肤，但它真正的内核是信息密度与纪律：每个字符占位确定、每条 1px 细线都有语义、留白是计算出来的而不是随手留的。"]},
+      {h:"密度即诚实",ps:["当你看到这个界面，你看到的其实是排版系统在克制地汇报它有多少信息可以给你。"]}]},
+  { id:"004", cat:"#知识库", t:"双模式检索的产品学：让用户选快与准", w:1, tags:["#知识库"], date:"2026.10",
+    sum:"把延迟的权衡交给提问的人。",
+    secs:[{h:"快与准的分工",ps:["工程上我们总想自动决定用哪条检索链路，但问题形态只有提问者自己清楚——他在找事实还是找论证。与其训练一个路由模型猜，不如把 quick/deep 做成两个开关，用界面文案把延迟预期说清楚。"]}]},
+  { id:"005", cat:"#Agent", t:"agent.spawn 的最小切口（预设计）", w:2, tags:["#Agent","#随笔"], date:"2026.09",
+    sum:"不做重型团队，先做一个工具。",
+    secs:[
+      {h:"调研结论",ps:["调研过 Claude Code 的 Agent Teams 和 OpenAI Agents SDK 之后，结论是多智能体的价值点不在邮箱和任务看板，而在两个朴素的场景：复杂任务分派与长上下文隔离。"]},
+      {h:"最小实现",ps:["最小实现是一个 agent.spawn 工具：子代理独立上下文跑完工具循环，结果以文本回传。预算字段和迹线事件都已经在等这一天。"]}]},
+  { id:"006", cat:"#Agent", t:"WS 流式的背压：让终端光标优雅地等", w:1, tags:["#Agent"], date:"2026.09",
+    sum:"渲染速度跟不上 token 速度时，丢帧比排队诚实。",
+    secs:[{h:"丢帧策略",ps:["流式输出最常见的毛病是前端把全部 chunk 逐字排进动画队列，网络一抖输入框就变成幻灯片。用 rAF 合帧+丢旧帧的策略，光标永远只追最新内容，用户感知到的是稳定而不是快速。"]}]},
+  { id:"007", cat:"#管道", t:"SOP 流水线：把 AI 从对话里请出来干活", w:1, tags:["#管道"], date:"2026.09",
+    sum:"离线批处理与交互式对话是两种生物。",
+    secs:[{h:"上下文策略的分野",ps:["流水线和对话的本质区别是上下文策略：对话共享历史，流水线只传递前序产出。把两者的引擎混在一起，你会同时得到一个贵的对话和一个不可靠的流水线。断点重试是流水线独有的仁慈——每一步的产物落库，失败从断点续跑。"]}]},
+  { id:"008", cat:"#管道", t:"MinIO 预签名 URL 的几个坑", w:1, tags:["#管道"], date:"2026.09",
+    sum:"过期时间、Content-Type 与浏览器行为的三方拉扯。",
+    secs:[{h:"响应头也要签进去",ps:["预签名 URL 最大的坑不在签名算法，而在浏览器用自己的猜测覆盖了你设置的 Content-Type，下载来的文件名字就不对了。办法是在签名时把响应头一并签进去。"]}]},
+  { id:"009", cat:"#知识库", t:"LightRAG 图谱检索的适用边界", w:2, tags:["#知识库"], date:"2026.08",
+    sum:"跨文档多跳推理它行，单点事实查找它慢。",
+    secs:[
+      {h:"甜区在哪里",ps:["图谱 RAG 的甜区是「A 和 B 在这件事上有什么关系」这类跨文档归纳；对「某配置项的默认值」这种单点事实，纯向量直取反而又快又准。"]},
+      {h:"双模式产品化",ps:["所以知识库问答做了双模式：quick 直取向量，deep 走图谱+向量，让用户按问题形态自己选。"]}]},
+  { id:"010", cat:"#知识库", t:"向量库选型的三个 ignored 问题", w:1, tags:["#知识库"], date:"2026.08",
+    sum:"大家都在比 QPS，没人聊删除语义。",
+    secs:[{h:"被忽略的两件事",ps:["选型讨论集中在性能数字上，但生产里先出事的是删除：文档更新时切片要同步清理，按 doc_id 的删除路径是否高效直接决定系统会不会腐烂。第二个 ignored 问题是过滤检索（match any doc_id），目录范围问答全靠它。"]}]},
+  { id:"011", cat:"#Agent", t:"流式对话的工具循环：防死循环的三道闸", w:2, tags:["#Agent","#管道"], date:"2026.08",
+    sum:"唯一调用上限、总步数上限、同参缓存。",
+    secs:[
+      {h:"三道闸门",ps:["原生 function-calling 循环最危险的形态是模型与工具互相说服着原地打转。三道闸门足够安全：同一工具+同参数只执行一次、单工具调用数上限、循环总步数上限。配上预算熔断（token/费用/超时），可以放心把循环跑在生产会话里。"]},
+      {h:"意外的收益",ps:["有趣的是，同参缓存不只防死循环，还顺手挡住了模型的重复劳动倾向——它发现同一问题第二次问没有新信息时，往往会自己换路。"]}]},
+  { id:"012", cat:"#知识库", t:"知识库为什么要扁平存储：目录是视图，不是仓库", w:3, tags:["#知识库"], date:"2026.07",
+    sum:"把目录从存储层挪到视图层之后，检索与组织第一次互不掣肘。",
+    secs:[
+      {h:"路径即身份的代价",ps:["传统文档系统的第一原则是路径即身份，于是每一次移动文件都是一次牵一发动全身的手术。把目录降级为邻接表加软链接之后，文档本体获得了自由：一份《Qdrant 配置手册》可以同时住在「部署」和「排障」两个目录里，而向量切片对这件事毫无察觉。"]},
+      {h:"心智模型的迁移",ps:["扁平存储真正的代价是心智模型的迁移：你需要接受「目录只是当前视角」这一事实。好处则是一劳永逸——检索逻辑永远面对一个不分支的文档池，范围过滤退化为一个 doc_id 集合的匹配问题。"]}]},
+  { id:"013", cat:"#Agent", t:"Agent 的边界应该长在权限上，而不是提示词里", w:3, tags:["#Agent"], date:"2026.07",
+    sum:"提示词可以骗过模型，权限校验骗不过。",
+    secs:[
+      {h:"提示词防线的虚妄",ps:["给 Agent 设边界的常见做法是写一段「你只能做这些」的系统提示词，这在演示里有效，在真实系统里形同虚设。"]},
+      {h:"权限才是硬边界",ps:["真正可靠的边界必须长在权限体系上：角色→权限点→工具可见性→Agent 工具子集，层层收敛，服务端在注册和执行时做双保险校验。当工具在注册表层面就看不见，模型连幻觉它的机会都没有。这比任何提示词工程都便宜且坚固。"]}]},
+  { id:"014", cat:"#管道", t:"SQLite 单文件作为工作台主库的一年", w:1, tags:["#管道","#随笔"], date:"2026.07",
+    sum:"个人规模下，备份是 cp，恢复也是 cp。",
+    secs:[{h:"一年的使用报告",ps:["选择 SQLite 的理由说出来很俗：它让整个工作台的数据变成一个可以 cp 的文件。一年下来没有遇到锁问题，drizzle-kit push 的建表体验甚至比某些托管数据库更顺手。规模红线到了再换，架构上 SQLite 不欠任何人。"]}]},
+];
+/* 预置评论（演示）：部分文章带讨论 */
+const SEED_COMMENTS = {
+  "012":[
+    {name:"迟到的公理",time:"2026-08-02",text:"「目录只是当前视角」这句点醒了我们团队正在争吵的文档规范问题，受益。",replies:[{name:"author",time:"2026-08-02",text:"对，多数文档系统的争吵本质上是在争「哪一种视角是正统」，其实都是。"}]},
+    {name:"vector_fox",time:"2026-08-05",text:"多目录挂载在删除目录时怎么保证不误删文档本体？",replies:[{name:"author",time:"2026-08-05",text:"删除目录只删视图与映射，文档本体与向量保留——这条规则写进了删除确认弹窗文案里。"}]},
+  ],
+  "013":[
+    {name:"prompt_engineer",time:"2026-07-20",text:"双保险校验具体指什么？注册时和执行时各查一次吗？"},
+  ],
+  "001":[
+    {name:"grid_walker",time:"2026-11-02",text:"所以最终选了台账而不是星图？我认为你是对的，秩序感确实更重要。"},
+  ],
+};
+
+/* ============ 视图一：台账渲染 + 分类 + 排序 ============ */
+const ledger = document.getElementById("ledger");
+const MAXW = Math.max(...POSTS.map((p) => p.w));
+let curCat = "#全部";
+const SORTS = [["最新",(a,b)=>b.date.localeCompare(a.date)],["最早",(a,b)=>a.date.localeCompare(b.date)],["最长",(a,b)=>b.w-a.w]];
+let curSort = 0;
+const rowEls = new Map();
+POSTS.forEach((p) => {
+  const el = document.createElement("div");
+  el.className = "row";
+  el.innerHTML = `
+    <div class="row-h">
+      <span class="r-no">${p.id}</span>
+      <span class="r-title" title="${p.t}">${p.t}</span>
+      <span class="r-tags">${p.tags.join(" ")}</span>
+      <span class="r-tick-wrap"><span class="r-tick" style="width:${(p.w / MAXW) * 100}%"></span></span>
+      <span class="r-date">${p.date}</span>
+      <span class="r-ind">▾</span>
+    </div>
+    <div class="row-b">
+      <div class="r-inner">
+        <div class="r-sum"><span class="k">摘要 · ${p.date}</span>${p.sum}</div>
+        <span class="r-cmt">💬 ${(SEED_COMMENTS[p.id]||[]).length}</span>
+        <button class="r-more">▸ 阅读全文</button>
+      </div>
+    </div>`;
+  el.addEventListener("mouseenter", () => setOpen(el));
+  el.querySelector(".r-more").addEventListener("click", (e) => { e.stopPropagation(); openReader(p.id, el); });
+  ledger.appendChild(el);
+  rowEls.set(p.id, el);
+});
+function setOpen(el){
+  if (el.classList.contains("open")) return;
+  ledger.querySelectorAll(".row.open").forEach((r) => r.classList.remove("open"));
+  el.classList.add("open");
+}
+setOpen(rowEls.get("001"));
+ledger.addEventListener("mouseleave", () => setOpen(rowEls.get("001")));
+
+/* 分类：页头等宽词，点谁谁留下 */
+const catBar = document.getElementById("catBar");
+const catCnt = document.getElementById("catCnt");
+CATS.forEach((c) => {
+  const b = document.createElement("button");
+  b.className = "cat" + (c === "#全部" ? " on" : "");
+  b.textContent = c;
+  b.onclick = () => {
+    curCat = c;
+    catBar.querySelectorAll(".cat").forEach((x) => x.classList.toggle("on", x === b));
+    applyFilter();
+  };
+  catBar.insertBefore(b, catCnt);
+});
+function applyFilter(){
+  let n = 0;
+  rowEls.forEach((el, id) => {
+    const p = POSTS.find((x) => x.id === id);
+    const show = curCat === "#全部" || p.cat === curCat;
+    el.classList.toggle("hidden", !show);
+    if (show) n++;
+  });
+  catCnt.textContent = `${curCat} · ${n} 篇`;
+  if (!ledger.querySelector(".row.open:not(.hidden)")) {
+    const first = ledger.querySelector(".row:not(.hidden)");
+    if (first) setOpen(first);
+  }
+}
+applyFilter();
+
+/* 排序：循环 最新/最早/最长，DOM 重排（FLIP 由浏览器 transition 自然过渡） */
+const sortBtn = document.getElementById("sortBtn");
+const sortLab = document.getElementById("sortLab");
+sortBtn.onclick = () => {
+  curSort = (curSort + 1) % SORTS.length;
+  sortLab.textContent = SORTS[curSort][0];
+  const ids = POSTS.slice().sort(SORTS[curSort][1]).map((p) => p.id);
+  ids.forEach((id) => ledger.appendChild(rowEls.get(id)));
+  const first = ledger.querySelector(".row:not(.hidden)");
+  if (first) setOpen(first);
+};
+
+/* ============ 视图二：阅读页（FLIP 铺满 + 目录 + 评论 + 上下篇） ============ */
+const reader = document.getElementById("reader");
+const panel = document.getElementById("readerPanel");
+const mask = document.getElementById("readerMask");
+const rpScroll = document.getElementById("rpScroll");
+let curIdx = -1;
+const idxOf = (id) => POSTS.findIndex((p) => p.id === id);
+
+function renderArticle(p){
+  curIdx = idxOf(p.id);
+  const prev = POSTS[curIdx + 1], next = POSTS[curIdx - 1];
+  const words = p.secs.reduce((n, s) => n + s.ps.join("").length, 0);
+  document.getElementById("rpCrumb").textContent = `ledger://blog/${p.id} · ${p.date}`;
+  document.getElementById("rpArticle").innerHTML =
+    `<div class="kicker">${p.id} · ${p.cat}</div>` +
+    `<h2>${p.t}</h2>` +
+    `<div class="rp-meta"><span class="tags">${p.tags.join(" ")}</span><span>${p.date}</span><span>约 ${words} 字 · 预计 ${Math.max(1, Math.round(words / 400))} 分钟</span></div>` +
+    `<hr class="hr">` +
+    `<div class="kicker">摘要</div><p>${p.sum}</p>` +
+    p.secs.map((s, i) => `<h3 id="sec${i}">${s.h}</h3>` + s.ps.map((x) => `<p>${x}</p>`).join("")).join("");
+  /* 左侧目录：随滚动高亮 */
+  const toc = document.getElementById("toc");
+  toc.innerHTML = `<div class="t-lab">// 目录</div>` +
+    p.secs.map((s, i) => `<a href="#sec${i}" data-i="${i}">${s.h}</a>`).join("");
+  toc.querySelectorAll("a").forEach((a) => {
+    a.onclick = (e) => {
+      e.preventDefault();
+      document.getElementById("sec" + a.dataset.i)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    };
+  });
+  document.getElementById("rpPrevT").textContent = prev ? `${prev.id} ${prev.t}` : "— 已是更早 —";
+  document.getElementById("rpNextT").textContent = next ? `${next.id} ${next.t}` : "— 已是最新 —";
+  document.getElementById("rpPrev").style.opacity = prev ? 1 : .35;
+  document.getElementById("rpNext").style.opacity = next ? 1 : .35;
+  renderComments(p);
+  rpScroll.scrollTop = 0;
+}
+/* 目录 scrollspy */
+rpScroll.addEventListener("scroll", () => {
+  const hs = [...document.querySelectorAll("#rpArticle h3")];
+  let cur = -1;
+  hs.forEach((h, i) => { if (h.getBoundingClientRect().top < 120) cur = i; });
+  document.querySelectorAll("#toc a").forEach((a) => a.classList.toggle("on", +a.dataset.i === cur));
+});
+
+/* 评论：文章 + 评论 = 博客两大主体之二 */
+function renderComments(p){
+  const box = document.getElementById("cmts");
+  const list = SEED_COMMENTS[p.id] || [];
+  const count = list.reduce((n, c) => n + 1 + (c.replies?.length || 0), 0);
+  box.innerHTML = `<div class="c-lab">// 评论 · ${count}</div>`;
+  if (!list.length) {
+    box.insertAdjacentHTML("beforeend", `<div class="empty-tip">// 还没有评论，写下第一条</div>`);
+  }
+  list.forEach((c, ci) => {
+    box.insertAdjacentHTML("beforeend", cmtHtml(c, ci + 1));
+    (c.replies || []).forEach((r, ri) => {
+      box.querySelector(`[data-ci="${ci}"]`)?.insertAdjacentHTML("afterend",
+        `<div style="padding-left:42px">${cmtHtml(r, ci + 1, true)}</div>`);
+    });
+  });
+  box.insertAdjacentHTML("beforeend", `
+    <div class="c-form">
+      <div class="f-row"><span class="pfx">▸</span><input id="cfName" placeholder="昵称（可留空：匿名）" maxlength="24"></div>
+      <textarea id="cfText" placeholder="说点什么…（⏎ 提交需点击按钮）"></textarea>
+      <div class="f-foot">
+        <span class="f-hint">// 演示原型：评论仅保存在本页内存，刷新即还原</span>
+        <button class="f-sub" id="cfSend">⏎ 发布评论</button>
+      </div>
+    </div>`);
+  box.querySelector("#cfSend").onclick = () => {
+    const name = box.querySelector("#cfName").value.trim() || "匿名";
+    const text = box.querySelector("#cfText").value.trim();
+    if (!text) { box.querySelector("#cfText").focus(); return; }
+    (SEED_COMMENTS[p.id] ||= []).unshift({ name, time: "刚刚", text });
+    renderComments(p);
+  };
+}
+function cmtHtml(c, floor, isReply){
+  const ini = (c.name || "?").slice(0, 2);
+  return `<div class="cmt${isReply ? "" : ""}" ${isReply ? "" : 'data-ci="x"'} style="${isReply ? "" : ""}">
+    <span class="c-ava">${ini}</span>
+    <div class="c-main">
+      <div class="c-h"><span class="n">${c.name}</span><span>${c.time}</span><span class="fl">#${floor}${isReply ? " · 回复" : ""}</span></div>
+      <div class="c-t">${c.text}</div>
+    </div>
+  </div>`;
+}
+
+/* 打开/关闭 + hash 路由（浏览器返回可用） */
+function openReader(id, el){
+  const p = POSTS[idxOf(id)];
+  renderArticle(p);
+  if (!reader.classList.contains("active")) {
+    const nr = (el || rowEls.get(id)).getBoundingClientRect();
+    panel.style.transition = "none";
+    setPanelRect(nr.left, nr.top, nr.width, Math.max(nr.height, 46));
+    mask.style.opacity = "0";
+    reader.classList.add("active");
+    requestAnimationFrame(() => {
+      mask.style.opacity = "1";
+      panel.style.transition = "all .45s var(--ease)";
+      setPanelRect(0, 0, innerWidth, innerHeight);
+    });
+  }
+  if (location.hash !== `#/p/${id}`) history.pushState(null, "", `#/p/${id}`);
+}
+function setPanelRect(x, y, w, h){
+  panel.style.left = x + "px"; panel.style.top = y + "px";
+  panel.style.width = w + "px"; panel.style.height = h + "px";
+}
+function closeReader(){
+  if (!reader.classList.contains("active")) return;
+  panel.style.transition = "all .3s var(--ease)";
+  panel.style.opacity = "0";
+  mask.style.opacity = "0";
+  setTimeout(() => { reader.classList.remove("active"); panel.style.opacity = "1"; }, 300);
+  if (location.hash.startsWith("#/p/")) history.pushState(null, "", location.pathname);
+}
+window.addEventListener("popstate", () => {
+  const m = location.hash.match(/^#\/p\/(\d+)$/);
+  if (m && idxOf(m[1]) >= 0) openReader(m[1], rowEls.get(m[1]));
+  else closeReader();
+});
+function goIdx(i){ if (POSTS[i]) openReader(POSTS[i].id, rowEls.get(POSTS[i].id)); }
+document.getElementById("rpBack").addEventListener("click", closeReader);
+mask.addEventListener("click", closeReader);
+document.getElementById("rpPrev").addEventListener("click", () => goIdx(curIdx + 1));
+document.getElementById("rpNext").addEventListener("click", () => goIdx(curIdx - 1));
+document.getElementById("brandHome").addEventListener("click", closeReader);
+window.addEventListener("keydown", (e) => {
+  if (!reader.classList.contains("active")) return;
+  if (e.key === "Escape") closeReader();
+  if (e.key === "ArrowLeft") goIdx(curIdx + 1);
+  if (e.key === "ArrowRight") goIdx(curIdx - 1);
+});
+addEventListener("load", () => {
+  const m = location.hash.match(/^#\/p\/(\d+)$/);
+  if (m && idxOf(m[1]) >= 0) openReader(m[1], rowEls.get(m[1]));
+});
+
+/* 主题切换 */
+document.getElementById("themeBtn").addEventListener("click", () => {
+  const b = document.body;
+  b.dataset.theme = b.dataset.theme === "warm" ? "" : "warm";
+});
+</script>
+</body>
+</html>
