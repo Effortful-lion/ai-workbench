@@ -176,7 +176,7 @@ export const blogPosts = sqliteTable("blog_posts", {
     .$defaultFn(() => new Date()),
 });
 
-/** 博客评论：一级即可（无深层嵌套）；游客评论仅昵称；过审制开关在 status 上 */
+/** 博客评论：树形（root_id + parent_id + 深度压平），写时冗余被回复人；审核状态机在 status */
 export const blogComments = sqliteTable("blog_comments", {
   id: text("id").primaryKey(),
   postId: text("post_id")
@@ -185,7 +185,21 @@ export const blogComments = sqliteTable("blog_comments", {
   userId: text("user_id").references(() => users.id, { onDelete: "set null" }),
   nickname: text("nickname").notNull(),
   content: text("content").notNull(),
-  status: text("status", { enum: ["approved", "hidden"] }).notNull().default("approved"),
+  /** 顶级评论 = 自身 id；回复 = 所属根评论 id */
+  rootId: text("root_id").notNull().default(""),
+  /** 空串 = 顶级；回复指向根评论（超过 2 级一律压平） */
+  parentId: text("parent_id").notNull().default(""),
+  /** 冗余：被回复人 id / 昵称，渲染时不再联表 */
+  replyToUserId: text("reply_to_user_id"),
+  replyToUsername: text("reply_to_username"),
+  /** 0 = 顶级，1 = 回复 */
+  depth: integer("depth").notNull().default(0),
+  status: text("status", { enum: ["pending", "approved", "rejected", "hidden"] })
+    .notNull()
+    .default("approved"),
+  /** 审核备注（拒绝原因 / 人工标记） */
+  reviewNote: text("review_note"),
+  reviewedAt: integer("reviewed_at", { mode: "timestamp" }),
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
     .$defaultFn(() => new Date()),

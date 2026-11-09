@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { BlogCommentDto, BlogPublicPostDetailDto, BlogPublicPostDto } from "@aiwb/shared";
+import type {
+  BlogCommentDto, BlogCommentPageDto, BlogPublicPostDetailDto, BlogPublicPostDto,
+} from "@aiwb/shared";
 import { api } from "../../lib/api";
 import { Icon } from "../../lib/icons";
 import { useAuthStore } from "../../stores/auth";
@@ -15,7 +17,9 @@ export default function PublicBlogPage({ username, slug }: { username: string; s
   const [openSlug, setOpenSlug] = useState<string | null>(slug ?? null);
   const [post, setPost] = useState<BlogPublicPostDetailDto | null>(null);
   const [postError, setPostError] = useState<string | null>(null);
-  const [comments, setComments] = useState<BlogCommentDto[]>([]);
+  const [comments, setComments] = useState<BlogCommentPageDto | null>(null);
+  const [commentsPage, setCommentsPage] = useState(1);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   const panelRef = useRef<HTMLDivElement>(null);
   const jumpFrom = useRef<DOMRect | null>(null);
@@ -34,13 +38,32 @@ export default function PublicBlogPage({ username, slug }: { username: string; s
       .catch((e) => setListError(e instanceof Error ? e.message : String(e)));
   }, [listUrl]);
 
+  /** 拉取评论：page=1 覆盖，>1 追加（一级分页 + 子评论批量由服务端组装） */
+  const loadComments = useCallback(
+    async (targetSlug: string, page: number, append: boolean) => {
+      const r = await fetch(`${postUrl(targetSlug)}/comments?page=${page}&pageSize=10`);
+      if (!r.ok) return;
+      const d = (await r.json()) as BlogCommentPageDto;
+      setComments((prev) => {
+        if (!append || !prev) return d;
+        const seen = new Set(prev.threads.map((t) => t.root.id));
+        return {
+          ...d,
+          threads: [...prev.threads, ...d.threads.filter((t) => !seen.has(t.root.id))],
+        };
+      });
+    },
+    [listUrl],
+  );
+
   // 正文 + 评论
   useEffect(() => {
     if (!openSlug) return;
     let alive = true;
     setPost(null);
     setPostError(null);
-    setComments([]);
+    setComments(null);
+    setCommentsPage(1);
     fetch(postUrl(openSlug))
       .then(async (r) => {
         if (!r.ok) throw new Error((await r.json().catch(() => ({}))).message ?? `HTTP ${r.status}`);
@@ -48,14 +71,24 @@ export default function PublicBlogPage({ username, slug }: { username: string; s
       })
       .then((d) => alive && setPost(d))
       .catch((e) => alive && setPostError(e instanceof Error ? e.message : String(e)));
-    fetch(`${postUrl(openSlug)}/comments`)
-      .then(async (r) => (r.ok ? ((await r.json()) as BlogCommentDto[]) : []))
-      .then((d) => alive && setComments(d))
-      .catch(() => alive && setComments([]));
+    void loadComments(openSlug, 1, false);
     return () => {
       alive = false;
     };
-  }, [openSlug]);
+  }, [openSlug, loadComments]);
+
+  /** 加载更多一级评论 */
+  const loadMoreComments = useCallback(async () => {
+    if (!openSlug || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const next = commentsPage + 1;
+      await loadComments(openSlug, next, true);
+      setCommentsPage(next);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [openSlug, commentsPage, loadingMore, loadComments]);
 
   // FLIP：卡片矩形 → 全屏（450ms）
   useLayoutEffect(() => {
@@ -121,15 +154,20 @@ export default function PublicBlogPage({ username, slug }: { username: string; s
     window.history.pushState({ blog: s }, "", `/b/${encodeURIComponent(username)}/${encodeURIComponent(s)}`);
   };
 
-  const submitComment = async (input: { content: string }) => {
-    if (!openSlug) return;
+  const submitComment = async (input: { content: string; parentId?: string | null }) => {
+    if (!openSlug) throw new Error("文章未打开");
     // 评论发表需登录：api() 自动带 token 并处理 401 续期
     const c = await api<BlogCommentDto>(
       `/blog/public/${encodeURIComponent(username)}/${encodeURIComponent(openSlug)}/comments`,
       { method: "POST", body: JSON.stringify(input) },
     );
-    setComments((prev) => [c, ...prev]);
-    setPost((p) => (p ? { ...p, commentCount: p.commentCount + 1 } : p));
+    // 待审评论不直接上屏；通过审核的重新拉第一页保证顺序与楼层正确
+    if (c.status === "approved") {
+      await loadComments(openSlug, 1, false);
+      setCommentsPage(1);
+      setPost((p) => (p ? { ...p, commentCount: p.commentCount + 1 } : p));
+    }
+    return c;
   };
 
   return (
@@ -190,6 +228,8 @@ export default function PublicBlogPage({ username, slug }: { username: string; s
                 onBack={close}
                 onNavigate={(s) => open(s)}
                 onSubmitComment={submitComment}
+                onLoadMoreComments={() => void loadMoreComments()}
+                loadingMoreComments={loadingMore}
               />
             )}
           </div>

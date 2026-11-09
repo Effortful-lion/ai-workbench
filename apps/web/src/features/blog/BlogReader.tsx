@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { BlogCommentDto, BlogPublicPostDetailDto } from "@aiwb/shared";
+import type { BlogCommentDto, BlogCommentPageDto, BlogPublicPostDetailDto } from "@aiwb/shared";
 import { Icon } from "../../lib/icons";
 import BlogMarkdown from "./BlogMarkdown";
 import CommentThread from "./CommentThread";
@@ -7,10 +7,12 @@ import { CATEGORY_META, formatDate, parseHeadings, readMinutes } from "./blogUti
 
 interface Props {
   post: BlogPublicPostDetailDto;
-  comments: BlogCommentDto[];
+  comments: BlogCommentPageDto | null;
   onBack: () => void;
   onNavigate: (slug: string) => void;
-  onSubmitComment?: (input: { content: string }) => Promise<void>;
+  onSubmitComment?: (input: { content: string; parentId?: string | null }) => Promise<BlogCommentDto>;
+  onLoadMoreComments?: () => void;
+  loadingMoreComments?: boolean;
   /** 当前登录用户名：null/undefined = 未登录（评论区显示登录引导） */
   author?: string | null;
   readOnlyComments?: boolean;
@@ -19,7 +21,8 @@ interface Props {
 
 /** 深度阅读页：顶栏 + 左目录 scrollspy + 680px 版心 + 上下篇 + 评论区 */
 export default function BlogReader({
-  post, comments, onBack, onNavigate, onSubmitComment, author, readOnlyComments, embedded,
+  post, comments, onBack, onNavigate, onSubmitComment, onLoadMoreComments,
+  loadingMoreComments, author, readOnlyComments, embedded,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const headings = useMemo(() => parseHeadings(post.contentMd), [post.contentMd]);
@@ -172,10 +175,12 @@ export default function BlogReader({
         {/* 评论 */}
         <div className="mt-10">
           <CommentThread
-            comments={comments}
+            page={comments}
             author={author}
             readOnly={readOnlyComments}
             onSubmit={onSubmitComment}
+            onLoadMore={onLoadMoreComments}
+            loadingMore={loadingMoreComments}
           />
         </div>
 

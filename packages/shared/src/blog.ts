@@ -75,21 +75,60 @@ export interface BlogPostPatchInput {
   status?: BlogPostStatus;
 }
 
-export const BLOG_COMMENT_STATUSES = ["approved", "hidden"] as const;
+export const BLOG_COMMENT_STATUSES = ["pending", "approved", "rejected", "hidden"] as const;
 export type BlogCommentStatus = (typeof BLOG_COMMENT_STATUSES)[number];
 
+/**
+ * 评论：树形模型用 root_id + parent_id + 写时冗余，展示强制压平到 2 级。
+ * - rootId：顶级评论 id（顶级评论自身 rootId = 自身 id）
+ * - parentId：空串 = 顶级；二级回复指向根评论
+ * - depth：0 = 顶级，1 = 回复；更深的回复压平到 1
+ */
 export interface BlogCommentDto {
   id: string;
   postId: string;
-  /** 可空 = 游客评论（仅昵称） */
   userId: string | null;
   nickname: string;
   content: string;
+  rootId: string;
+  parentId: string;
+  /** 冗余：被回复人（避免渲染时联表查用户） */
+  replyToUserId: string | null;
+  replyToUsername: string | null;
+  depth: number;
   status: BlogCommentStatus;
   createdAt: number;
 }
 
-/** 发表评论：评论人身份取当前登录账号，不再接受客户端昵称 */
+/** 发表评论：身份取登录账号；parentId 空 = 顶级，否则为被回复评论 id */
 export interface BlogCommentInput {
   content: string;
+  parentId?: string | null;
+}
+
+/** 一级评论 + 其下回复（内存组装后的展示单元） */
+export interface BlogCommentThreadDto {
+  root: BlogCommentDto;
+  children: BlogCommentDto[];
+}
+
+/** 分页：先一级分页，再按 rootId 批量取子评论 */
+export interface BlogCommentPageDto {
+  threads: BlogCommentThreadDto[];
+  /** 一级评论总数（不含回复） */
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+/** 审核台条目：评论 + 所属文章标题 */
+export interface BlogModerationItemDto {
+  comment: BlogCommentDto;
+  postTitle: string;
+  postSlug: string;
+}
+
+export interface BlogModerationPatchInput {
+  status: BlogCommentStatus;
+  note?: string;
 }

@@ -1,8 +1,8 @@
 import {
-  BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, UseGuards,
+  BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards,
 } from "@nestjs/common";
 import type {
-  BlogCommentInput, BlogPostPatchInput, BlogPublishFromKbInput,
+  BlogCommentInput, BlogModerationPatchInput, BlogPostPatchInput, BlogPublishFromKbInput,
 } from "@aiwb/shared";
 import { JwtAuthGuard, CurrentUser, type AuthUser } from "../auth/jwt-auth.guard";
 import { PermissionGuard, RequirePerm } from "../common/permission.guard";
@@ -84,16 +84,37 @@ export class BlogController {
     }
   }
 
+  /** 审核队列：默认全部，可按 pending/approved/rejected/hidden 过滤 */
+  @Get("moderation/comments")
+  @UseGuards(JwtAuthGuard, PermissionGuard)
+  @RequirePerm("blog:read")
+  async moderationQueue(
+    @CurrentUser() user: AuthUser,
+    @Query("status") status?: string,
+  ) {
+    const st = (["pending", "approved", "rejected", "hidden"] as const).find((s) => s === status);
+    try {
+      return await this.svc.listForModeration(user.id, st);
+    } catch (e) {
+      throw new BadRequestException((e as Error).message);
+    }
+  }
+
+  /** 审核动作：通过 / 拒绝 / 隐藏（结论回告评论者） */
   @Patch("comments/:id")
   @UseGuards(JwtAuthGuard, PermissionGuard)
   @RequirePerm("blog:write")
-  async setCommentStatus(
+  async reviewComment(
     @Param("id") id: string,
     @CurrentUser() user: AuthUser,
-    @Body() body: { status: "approved" | "hidden" },
+    @Body() body: BlogModerationPatchInput,
   ) {
     try {
-      await this.svc.setCommentStatus(user.id, id, body?.status === "hidden" ? "hidden" : "approved");
+      const status = (["pending", "approved", "rejected", "hidden"] as const).find(
+        (s) => s === body?.status,
+      );
+      if (!status) throw new Error("status 非法");
+      await this.svc.reviewComment(user.id, id, status, body?.note);
       return { ok: true };
     } catch (e) {
       throw new BadRequestException((e as Error).message);
@@ -126,8 +147,18 @@ export class BlogController {
   }
 
   @Get("public/:username/:slug/comments")
-  publicComments(@Param("username") username: string, @Param("slug") slug: string) {
-    return this.svc.publicComments(username, slug);
+  publicComments(
+    @Param("username") username: string,
+    @Param("slug") slug: string,
+    @Query("page") page?: string,
+    @Query("pageSize") pageSize?: string,
+  ) {
+    return this.svc.publicComments(
+      username,
+      slug,
+      Number(page) || 1,
+      Number(pageSize) || undefined,
+    );
   }
 
   /** 评论：公开可见，但发表需登录（身份取 token，不接受客户端昵称） */
