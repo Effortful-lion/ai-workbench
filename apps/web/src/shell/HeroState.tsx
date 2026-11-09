@@ -156,10 +156,13 @@ export default function HeroState() {
           <CommandSuggest text={text} onPick={handleCmd} onClose={() => setText("")} />
         </div>
         {/* 模型选择：注释行风格，与聊天栏共用 store 状态 */}
-        <div className="mt-2 flex items-center gap-2 font-mono text-[11px]">
-          <span className="text-tx3">// 模型</span>
-          <ModelPicker value={modelId} onChange={setModel} align="left" />
-          <span className="text-tx3">◎ 自动 = 服务端默认 · 与聊天栏联动</span>
+        <div className="mt-2 flex flex-col items-start gap-2 font-mono text-[11px]">
+          {/* 注释行在上 */}
+          <div className="text-tx3">// 模型 ◎ 自动 = 服务端默认 · 与聊天栏联动</div>
+          {/* ModelPicker 独占一行 */}
+          <div>
+            <ModelPicker value={modelId} onChange={setModel} align="left" />
+          </div>
         </div>
       </form>
 

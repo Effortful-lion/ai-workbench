@@ -80,11 +80,7 @@ export default function PickerChip({
     <div ref={rootRef} className="relative inline-flex flex-col" onKeyDown={onKeyDown}>
       <button
         type="button"
-        className={`flex min-w-0 items-center gap-1 rounded px-2 py-0.5 font-mono text-[10px] transition-colors ${
-          current && current.id !== null
-            ? "border border-acc text-acc hover:bg-acc/10"
-            : "border border-line text-tx3 hover:border-acc hover:text-acc"
-        } ${chipClass ?? ""}`}
+        className={`flex min-w-0 items-center gap-1 rounded border border-acc/40 bg-bg1 px-2 py-0.5 font-mono text-[10px] text-acc transition-colors hover:border-acc hover:bg-acc/10 focus:border-acc focus:bg-acc/10 focus:outline-none ${chipClass ?? ""}`}
         onClick={toggle}
         title={title ?? current?.name ?? "选择"}
       >
