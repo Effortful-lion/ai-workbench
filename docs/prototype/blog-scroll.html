@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI-WORKBENCH · BLOG · 测绘卷轴（手风琴纸带）</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,700;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/misans@4.0.0/lib/Normal/MiSans-Regular.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/misans@4.0.0/lib/Normal/MiSans-Medium.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/misans@4.0.0/lib/Normal/MiSans-Semibold.min.css">
+<style>
+/* ============ tokens（与工作台同源） ============ */
+:root{
+  --bg:#0B0D10; --bg1:#12151A; --bg2:#181C22; --line:#23282F; --line2:#2E3942;
+  --acc:#00E59B; --warn:#FFB000; --err:#FF5F56;
+  --tx:#E6E9EC; --tx2:#8A919A; --tx3:#4A5158; --body:#C2C8CF;
+  --a08:#00E59B08; --a0d:#00E59B0D; --a12:#00E59B12; --a22:#00E59B22;
+  --a2e:#00E59B2E; --a33:#00E59B33; --a55:#00E59B55;
+  --scroll:#23282F; --scroll-h:#2E343D; --dash:#1B2026; --hov:#ffffff05;
+  --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+  --sans:'MiSans','PingFang SC','Noto Sans SC','Microsoft YaHei',sans-serif;
+  --ease:cubic-bezier(.2,.8,.2,1);
+  --glow:0 0 12px var(--a22);
+}
+body[data-theme="warm"]{
+  --bg:#F4EFE4; --bg1:#ECE6D7; --bg2:#E3DBC7; --line:#D3C9B2; --line2:#C4B898;
+  --acc:#9A6200; --warn:#B4430F; --err:#C23327;
+  --tx:#29251D; --tx2:#6E6654; --tx3:#A79D86; --body:#3F3829;
+  --a08:#9A620008; --a0d:#9A62000D; --a12:#9A620012; --a22:#9A620022;
+  --a2e:#9A62002E; --a33:#9A620033; --a55:#9A620055;
+  --scroll:#CDC3AB; --scroll-h:#B8AC8F; --dash:#D8CFBB; --hov:#3C32200A;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+::selection{background:var(--a2e);color:var(--tx)}
+html,body{height:100%}
+body{background:var(--bg);color:var(--tx);font-family:var(--sans);font-size:14px;display:flex;flex-direction:column;overflow:hidden}
+body::before{
+  content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
+  background-image:
+    linear-gradient(rgba(255,255,255,.028) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(255,255,255,.028) 1px,transparent 1px);
+  background-size:32px 32px;
+}
+body[data-theme="warm"]::before{
+  background-image:
+    linear-gradient(rgba(90,70,30,.045) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(90,70,30,.045) 1px,transparent 1px);
+}
+body::after{
+  content:'';position:fixed;inset:0;z-index:80;pointer-events:none;opacity:.45;mix-blend-mode:overlay;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.05'/%3E%3C/svg%3E");
+}
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-thumb{background:var(--scroll);border-radius:4px}
+::-webkit-scrollbar-thumb:hover{background:var(--scroll-h)}
+::-webkit-scrollbar-track{background:transparent}
+button{font-family:inherit;background:none;border:none;color:inherit;cursor:pointer}
+
+/* ============ topbar ============ */
+.top{
+  height:50px;flex:none;display:flex;align-items:center;justify-content:space-between;
+  padding:0 20px;border-bottom:1px solid var(--line);position:relative;z-index:10;background:var(--bg);
+}
+.brand{display:flex;align-items:center;gap:10px;font-family:var(--mono);font-size:12px;letter-spacing:.1em;color:var(--tx)}
+.brand .mk{width:7px;height:7px;background:var(--acc);display:block}
+.brand small{color:var(--tx3);letter-spacing:.04em;font-size:10.5px}
+.top-r{display:flex;align-items:center;gap:14px;font-family:var(--mono);font-size:10.5px;color:var(--tx3)}
+.top-r b{color:var(--tx2);font-weight:400}
+.tbtn{border:1px solid var(--line);border-radius:3px;padding:3px 8px;font-family:var(--mono);font-size:10.5px;color:var(--tx3);transition:.15s}
+.tbtn:hover{border-color:var(--acc);color:var(--acc)}
+
+/* ============ masthead ============ */
+.mhead{flex:none;padding:22px 28px 14px;position:relative;z-index:5}
+.mhead h1{font-family:var(--mono);font-size:15px;letter-spacing:.16em;color:var(--tx);font-weight:500}
+.mhead h1 i{font-style:normal;color:var(--acc)}
+.mhead .sub{margin-top:6px;font-size:12px;color:var(--tx2);max-width:620px;line-height:1.7}
+.mhead .meta{margin-top:8px;font-family:var(--mono);font-size:10.5px;color:var(--tx3)}
+.mhead .meta b{color:var(--tx2);font-weight:400}
+
+/* ============ 测绘卷轴：等宽纸带 ============ */
+#reel{
+  flex:1;min-height:0;display:flex;align-items:stretch;
+  margin:0 28px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);
+  position:relative;z-index:4;
+}
+.strip{
+  flex:1 1 0%;min-width:0;position:relative;overflow:hidden;cursor:pointer;
+  display:flex;flex-direction:column;align-items:center;
+  border-left:1px solid var(--line);
+  transition:flex-grow .2s var(--ease), background .25s, opacity .25s;
+}
+.strip:first-child{border-left:none}
+.strip:hover{background:var(--hov)}
+/* 张开：最大者吸收全部空间 */
+#reel.has-open .strip{opacity:.55}
+#reel.has-open .strip.open{opacity:1;background:var(--bg1);flex-grow:4.6;cursor:default}
+/* 顶部编号 */
+.s-no{
+  flex:none;font-family:var(--mono);font-size:10px;color:var(--tx3);letter-spacing:.1em;
+  padding:12px 0 8px;transition:color .2s;
+}
+.strip.open .s-no{color:var(--acc)}
+/* 书脊：竖排标题 */
+.s-spine{
+  flex:1;min-height:0;display:flex;align-items:center;justify-content:center;padding:6px 0;
+}
+.s-spine .vt{
+  writing-mode:vertical-rl;text-orientation:mixed;
+  font-size:13px;color:var(--tx2);letter-spacing:.22em;line-height:1;white-space:nowrap;
+  transition:opacity .15s,color .2s;max-height:100%;
+}
+.strip.w-lg .s-spine .vt{color:var(--tx);font-weight:500;font-size:14px}
+.strip:hover .s-spine .vt{color:var(--acc)}
+/* 底部：字数刻度条 + 日期 */
+.s-foot{flex:none;display:flex;flex-direction:column;align-items:center;gap:6px;padding:8px 0 12px;width:100%}
+.s-tick{width:3px;background:var(--line2);border-radius:1px;transition:background .2s}
+.strip.open .s-tick,.strip:hover .s-tick{background:var(--acc)}
+.s-date{font-family:var(--mono);font-size:9px;color:var(--tx3);letter-spacing:.06em}
+/* 展开区：摘要（固定宽避免回流挤压） */
+.s-open{
+  flex:none;width:300px;max-width:100%;padding:14px 18px 18px;
+  opacity:0;transform:translateY(6px);transition:opacity .22s .12s,transform .22s .12s;
+  display:none;
+}
+.strip.open .s-open{display:block;opacity:1;transform:none}
+.strip.open .s-spine{display:none}
+.s-open .ht{font-size:17px;font-weight:600;color:var(--tx);line-height:1.5}
+.s-open .tags{margin-top:8px;font-family:var(--mono);font-size:10px;color:var(--acc);letter-spacing:.06em}
+.s-open .sum{margin-top:10px;font-size:12.5px;line-height:1.85;color:var(--body)}
+.s-open .more{margin-top:14px;display:inline-block;border:1px solid var(--line2);border-radius:3px;padding:4px 10px;font-family:var(--mono);font-size:10.5px;color:var(--tx2);transition:.15s}
+.s-open .more:hover{border-color:var(--acc);color:var(--acc)}
+
+/* ============ 阅读层（FLIP 自纸带展开） ============ */
+#reader{position:fixed;inset:0;z-index:100;pointer-events:none}
+#reader.open{pointer-events:auto}
+#readerMask{position:absolute;inset:0;background:color-mix(in srgb,var(--bg) 72%,transparent);opacity:0;transition:opacity .3s}
+#reader.open #readerMask{opacity:1}
+#readerPanel{
+  position:absolute;background:var(--bg1);border:1px solid var(--line2);border-radius:4px;
+  display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 80px rgba(0,0,0,.5);
+}
+.rp-head{flex:none;display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--bg2);font-family:var(--mono);font-size:10.5px;color:var(--tx3)}
+.rp-head .x{margin-left:auto;color:var(--tx3)}
+.rp-head .x:hover{color:var(--acc)}
+.rp-body{flex:1;overflow-y:auto;padding:22px 26px}
+.rp-body h2{font-size:20px;font-weight:600;color:var(--tx);line-height:1.5}
+.rp-body .tags{margin-top:10px;font-family:var(--mono);font-size:10.5px;color:var(--acc);letter-spacing:.05em}
+.rp-body .hr{margin:16px 0;border:none;border-top:1px solid var(--line)}
+.rp-body p{font-size:14px;line-height:1.95;color:var(--body);margin-bottom:14px}
+.rp-foot{flex:none;border-top:1px solid var(--line);padding:8px 16px;font-family:var(--mono);font-size:10px;color:var(--tx3)}
+
+/* ============ 状态栏 ============ */
+.foot{
+  height:34px;flex:none;display:flex;align-items:center;gap:18px;padding:0 28px;
+  border-top:1px solid var(--line);font-family:var(--mono);font-size:10px;color:var(--tx3);background:var(--bg);position:relative;z-index:10;
+}
+.foot .live{color:var(--acc)}
+.foot .r{margin-left:auto}
+
+/* ============ 移动端：竖向手风琴 ============ */
+@media (max-width:760px){
+  #reel{flex-direction:column;margin:0 16px;overflow-y:auto}
+  .strip{flex:none !important;border-left:none;border-top:1px solid var(--line);opacity:1 !important}
+  .strip:first-child{border-top:none}
+  .s-spine{display:none !important}
+  .s-head-row{display:flex !important;align-items:center;gap:12px;width:100%;padding:14px 16px}
+  .strip.open .s-head-row{background:transparent}
+  .s-no{padding:0}
+  .s-tick{width:auto;height:3px;flex:1}
+  .s-date{writing-mode:horizontal-tb}
+  .s-foot{flex-direction:row;padding:0 0 14px;width:auto}
+  .strip.open .s-foot{padding:0 16px 14px}
+  .strip{display:flex;flex-direction:column}
+  .strip .s-head-row{cursor:pointer}
+  .strip.open .s-open{padding:0 16px 18px}
+}
+/* 移动端头部行（桌面隐藏） */
+.s-head-row{display:none}
+</style>
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <span class="mk"></span>
+      AI-WORKBENCH <small>/ blog · 测绘卷轴 PAPER STRIP</small>
+    </div>
+    <div class="top-r">
+      <span>NODES <b>14</b> · 等宽纸带 · 悬停展开</span>
+      <button class="tbtn" id="themeBtn">◐ 换色</button>
+    </div>
+  </header>
+
+  <div class="mhead">
+    <h1>一卷<i>图纸</i>，而非一面墙</h1>
+    <div class="sub">所有文章排成一卷等宽纸带，像测绘蓝图或老式电报纸带：闭合时每条只露出书脊——编号、竖排标题、代表字数的刻度。悬停时纸带以弹性曲线推开邻带，露出摘要；点击即原位铺开阅读。秩序交给 1px 细线，变化只留一种。</div>
+    <div class="meta">刻度条长度 = 字数 · <b>#001</b> 最新一期默认微张 · 悬停展开 / 点击阅读</div>
+  </div>
+
+  <main id="reel"></main>
+
+  <footer class="foot">
+    <span class="live">● REEL ONLINE</span>
+    <span>14 条纸带 · 等宽</span>
+    <span>EXPAND 200ms 弹性</span>
+    <span class="r">原位放大（FLIP） · Esc 关闭阅读层</span>
+  </footer>
+
+  <!-- 阅读层 -->
+  <div id="reader">
+    <div id="readerMask"></div>
+    <div id="readerPanel">
+      <div class="rp-head">
+        <span id="rpCrumb">strip://blog/…</span>
+        <button class="x" id="rpClose">✕ 关闭（Esc）</button>
+      </div>
+      <div class="rp-body" id="rpBody"></div>
+      <div class="rp-foot">AI-WORKBENCH · 原位放大自测绘卷轴 · 无截断</div>
+    </div>
+  </div>
+
+<script>
+/* ============ 数据（与星图原型同一批，按时间倒序 = 最新在左） ============ */
+const POSTS = [
+  { id:"001", t:"把方格纸底纹变成坐标系：这篇博客就是这样画的", w:2, tags:["#随笔"], date:"2026.11",
+    sum:"装饰性网格终于获得了空间语义。",
+    body:["工作台界面上一直铺着一层 32px 的方格纸底纹，它只是安静地当背景。这一版把它升级成坐标系本体：横轴是思考的演进，纵轴是抽象度，每一篇文章落在网格的交叉点上。","当你移动鼠标，探针读数告诉你此刻凝视的是思考历程的哪个象限。博客不再是一摞等待被翻的卡片，而是一张正在通电的图纸。"] },
+  { id:"002", t:"为什么我不给博客做筛选器和排序控件", w:1, tags:["#随笔"], date:"2026.10",
+    sum:"控件是编辑器时代的遗迹，筛选是作者对自己分类能力的自白。",
+    body:["传统博客页脚总挂着标签云和排序下拉，这默认了读者需要在一堆平权列表里自己找路。但内容之间的权重差异本来就存在——一篇三个月打磨的长文和一篇十分钟的热修记录不该长得一样大。","在这个卷轴上，筛选被「展开」替代：你不需要把别的文章藏起来，只需要走到那条纸带跟前。"] },
+  { id:"003", t:"终端风的本质是密度，不是怀旧", w:2, tags:["#随笔"], date:"2026.10",
+    sum:"等宽字体是纪律的外显。",
+    body:["终端审美被滥用成绿色字加扫描线的皮肤，但它真正的内核是信息密度与纪律：每个字符占位确定、每条 1px 细线都有语义、留白是计算出来的而不是随手留的。当你看到这个界面，你看到的其实是排版系统在克制地汇报它有多少信息可以给你。"] },
+  { id:"004", t:"双模式检索的产品学：让用户选快与准", w:1, tags:["#kb","#随笔"], date:"2026.10",
+    sum:"把延迟的权衡交给提问的人。",
+    body:["工程上我们总想自动决定用哪条检索链路，但问题形态只有提问者自己清楚——他在找事实还是找论证。与其训练一个路由模型猜，不如把 quick/deep 做成两个开关，用界面文案把延迟预期说清楚。"] },
+  { id:"005", t:"agent.spawn 的最小切口（预设计）", w:2, tags:["#agent","#随笔"], date:"2026.09",
+    sum:"不做重型团队，先做一个工具。",
+    body:["调研过 Claude Code 的 Agent Teams 和 OpenAI Agents SDK 之后，结论是多智能体的价值点不在邮箱和任务看板，而在两个朴素的场景：复杂任务分派与长上下文隔离。最小实现是一个 agent.spawn 工具：子代理独立上下文跑完工具循环，结果以文本回传。预算字段和迹线事件都已经在等这一天。"] },
+  { id:"006", t:"WS 流式的背压：让终端光标优雅地等", w:1, tags:["#agent"], date:"2026.09",
+    sum:"渲染速度跟不上 token 速度时，丢帧比排队诚实。",
+    body:["流式输出最常见的毛病是前端把全部 chunk 逐字排进动画队列，网络一抖输入框就变成幻灯片。用 rAF 合帧+丢旧帧的策略，光标永远只追最新内容，用户感知到的是稳定而不是快速。"] },
+  { id:"007", t:"SOP 流水线：把 AI 从对话里请出来干活", w:1, tags:["#管道"], date:"2026.09",
+    sum:"离线批处理与交互式对话是两种生物。",
+    body:["流水线和对话的本质区别是上下文策略：对话共享历史，流水线只传递前序产出。把两者的引擎混在一起，你会同时得到一个贵的对话和一个不可靠的流水线。断点重试是流水线独有的仁慈——每一步的产物落库，失败从断点续跑。"] },
+  { id:"008", t:"MinIO 预签名 URL 的几个坑", w:1, tags:["#管道"], date:"2026.09",
+    sum:"过期时间、Content-Type 与浏览器行为的三方拉扯。",
+    body:["预签名 URL 最大的坑不在签名算法，而在浏览器用自己的猜测覆盖了你设置的 Content-Type，下载来的文件名字就不对了。办法是在签名时把响应头一并签进去。"] },
+  { id:"009", t:"LightRAG 图谱检索的适用边界", w:2, tags:["#kb"], date:"2026.08",
+    sum:"跨文档多跳推理它行，单点事实查找它慢。",
+    body:["图谱 RAG 的甜区是「A 和 B 在这件事上有什么关系」这类跨文档归纳；对「某配置项的默认值」这种单点事实，纯向量直取反而又快又准。所以知识库问答做了双模式：quick 直取向量，deep 走图谱+向量，让用户按问题形态自己选。"] },
+  { id:"010", t:"向量库选型的三个 ignored 问题", w:1, tags:["#kb"], date:"2026.08",
+    sum:"大家都在比 QPS，没人聊删除语义。",
+    body:["选型讨论集中在性能数字上，但生产里先出事的是删除：文档更新时切片要同步清理，按 doc_id 的删除路径是否高效直接决定系统会不会腐烂。第二个 ignored 问题是过滤检索（match any doc_id），目录范围问答全靠它。"] },
+  { id:"011", t:"流式对话的工具循环：防死循环的三道闸", w:2, tags:["#agent","#管道"], date:"2026.08",
+    sum:"唯一调用上限、总步数上限、同参缓存。",
+    body:["原生 function-calling 循环最危险的形态是模型与工具互相说服着原地打转。三道闸门足够安全：同一工具+同参数只执行一次、单工具调用数上限、循环总步数上限。配上预算熔断（token/费用/超时），可以放心把循环跑在生产会话里。","有趣的是，同参缓存不只防死循环，还顺手挡住了模型的重复劳动倾向——它发现同一问题第二次问没有新信息时，往往会自己换路。"] },
+  { id:"012", t:"知识库为什么要扁平存储：目录是视图，不是仓库", w:3, tags:["#kb"], date:"2026.07",
+    sum:"把目录从存储层挪到视图层之后，检索与组织第一次互不掣肘。",
+    body:["传统文档系统的第一原则是路径即身份，于是每一次移动文件都是一次牵一发动全身的手术。把目录降级为邻接表加软链接之后，文档本体获得了自由：一份《Qdrant 配置手册》可以同时住在「部署」和「排障」两个目录里，而向量切片对这件事毫无察觉。","扁平存储真正的代价是心智模型的迁移：你需要接受「目录只是当前视角」这一事实。好处则是一劳永逸——检索逻辑永远面对一个不分支的文档池，范围过滤退化为一个 doc_id 集合的匹配问题。"] },
+  { id:"013", t:"Agent 的边界应该长在权限上，而不是提示词里", w:3, tags:["#agent"], date:"2026.07",
+    sum:"提示词可以骗过模型，权限校验骗不过。",
+    body:["给 Agent 设边界的常见做法是写一段「你只能做这些」的系统提示词，这在演示里有效，在真实系统里形同虚设。真正可靠的边界必须长在权限体系上：角色→权限点→工具可见性→Agent 工具子集，层层收敛，服务端在注册和执行时做双保险校验。","当工具在注册表层面就看不见，模型连幻觉它的机会都没有。这比任何提示词工程都便宜且坚固。"] },
+  { id:"014", t:"SQLite 单文件作为工作台主库的一年", w:1, tags:["#随笔","#管道"], date:"2026.07",
+    sum:"个人规模下，备份是 cp，恢复也是 cp。",
+    body:["选择 SQLite 的理由说出来很俗：它让整个工作台的数据变成一个可以 cp 的文件。一年下来没有遇到锁问题，drizzle-kit push 的建表体验甚至比某些托管数据库更顺手。规模红线到了再换，架构上 SQLite 不欠任何人。"] },
+];
+
+/* ============ 渲染纸带 ============ */
+const reel = document.getElementById("reel");
+const MAXW = Math.max(...POSTS.map((p) => p.w));
+POSTS.forEach((p) => {
+  const el = document.createElement("div");
+  el.className = `strip w-${["","sm","md","lg"][p.w]}`;
+  el.innerHTML = `
+    <div class="s-head-row">
+      <span class="s-no">${p.id}</span>
+      <span class="s-spine" style="display:none"></span>
+    </div>
+    <div class="s-spine"><span class="vt">${p.t}</span></div>
+    <div class="s-open">
+      <div class="ht">${p.t}</div>
+      <div class="tags">${p.tags.join(" ")} · ${p.date}</div>
+      <div class="sum">${p.sum}</div>
+      <button class="more">▸ 阅读全文</button>
+    </div>
+    <div class="s-foot">
+      <span class="s-tick" style="height:${8 + (p.w / MAXW) * 26}px"></span>
+      <span class="s-date">${p.date}</span>
+    </div>`;
+  el.addEventListener("mouseenter", () => {
+    if (innerWidth <= 760) return;
+    setOpen(el);
+  });
+  el.querySelector(".s-head-row")?.addEventListener("click", () => {
+    if (innerWidth <= 760) el.classList.contains("open") ? el.classList.remove("open") : setOpen(el);
+  });
+  el.querySelector(".more").addEventListener("click", (e) => {
+    e.stopPropagation();
+    openReader(p, el);
+  });
+  reel.appendChild(el);
+});
+function setOpen(el){
+  if (el.classList.contains("open")) return;
+  reel.querySelectorAll(".strip.open").forEach((s) => s.classList.remove("open"));
+  el.classList.add("open");
+  reel.classList.add("has-open");
+}
+/* 最新一期默认微张 */
+setOpen(reel.firstElementChild);
+/* 鼠标离开卷轴：回到默认微张 */
+reel.addEventListener("mouseleave", () => {
+  if (innerWidth > 760) setOpen(reel.firstElementChild);
+});
+
+/* ============ 阅读层（FLIP 自纸带展开） ============ */
+const reader = document.getElementById("reader");
+const panel = document.getElementById("readerPanel");
+const mask = document.getElementById("readerMask");
+function openReader(p, el){
+  const nr = el.getBoundingClientRect();
+  panel.style.transition = "none";
+  setPanelRect(nr.left, nr.top, Math.max(nr.width, 120), nr.height);
+  panel.style.opacity = "1";
+  document.getElementById("rpCrumb").textContent = `strip://blog/${p.id} · ${p.date}`;
+  document.getElementById("rpBody").innerHTML =
+    `<h2>${p.t}</h2><div class="tags">${p.tags.join(" ")} · ${p.sum}</div><hr class="hr">` +
+    p.body.map((s) => `<p>${s}</p>`).join("");
+  reader.classList.add("open");
+  requestAnimationFrame(() => {
+    const pw = Math.min(720, innerWidth * 0.92), ph = innerHeight * 0.82;
+    panel.style.transition = "all .42s var(--ease)";
+    setPanelRect((innerWidth - pw) / 2, (innerHeight - ph) / 2 + 10, pw, ph);
+  });
+}
+function setPanelRect(x, y, w, h){
+  panel.style.left = x + "px"; panel.style.top = y + "px";
+  panel.style.width = w + "px"; panel.style.height = h + "px";
+  panel.style.opacity = "1";
+}
+function closeReader(){
+  panel.style.transition = "all .3s var(--ease)";
+  panel.style.opacity = "0";
+  reader.classList.remove("open");
+}
+mask.addEventListener("click", closeReader);
+document.getElementById("rpClose").addEventListener("click", closeReader);
+window.addEventListener("keydown", (e) => { if (e.key === "Escape") closeReader(); });
+
+/* ============ 主题切换 ============ */
+document.getElementById("themeBtn").addEventListener("click", () => {
+  const b = document.body;
+  b.dataset.theme = b.dataset.theme === "warm" ? "" : "warm";
+});
+</script>
+</body>
+</html>
