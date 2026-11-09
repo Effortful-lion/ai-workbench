@@ -98,23 +98,27 @@ export default function App() {
         ) : (
           <div className="flex h-full">
             {/* 桌面端：聊天栏固定 400px 与面板同屏；移动端（<lg）：聊天/面板互斥全屏，由 mobileView 决定
-                面板全屏：只收起对话栏，保留顶部 header */}
-            <div
-              className={
-                panelCount > 0
-                  ? `${fullscreen ? "hidden" : mobileView === "chat" ? "flex" : "hidden"} w-full flex-col border-line lg:flex lg:w-[400px] lg:flex-none lg:border-r`
-                  : "min-w-0 flex-1"
-              }
-            >
-              <ChatColumn />
-            </div>
+                面板全屏：对话栏整体不渲染（仅收起对话，TopBar 保留），退出后恢复双栏 */}
+            {panelCount === 0 ? (
+              <div className="min-w-0 flex-1">
+                <ChatColumn />
+              </div>
+            ) : (
+              !fullscreen && (
+                <div
+                  className={`${mobileView === "chat" ? "flex" : "hidden"} w-full flex-col border-line lg:flex lg:w-[400px] lg:flex-none lg:border-r`}
+                >
+                  <ChatColumn />
+                </div>
+              )
+            )}
             {panelCount > 0 && (
-              <div className={`${mobileView === "panel" ? "flex" : "hidden"} min-w-0 flex-1 flex-col lg:flex`}>
+              <div className={`${fullscreen || mobileView === "panel" ? "flex" : "hidden"} min-w-0 flex-1 flex-col lg:flex`}>
                 <PanelZone />
               </div>
             )}
-            {/* 移动端浮动切换按钮：聊天 ⇄ 面板 */}
-            {panelCount > 0 && (
+            {/* 移动端浮动切换按钮：聊天 ⇄ 面板（全屏时对话栏已收起，不显示） */}
+            {panelCount > 0 && !fullscreen && (
               <button
                 className="fixed bottom-14 right-4 z-40 flex h-10 items-center gap-1.5 rounded-full border border-acc/60 bg-bg1 px-3.5 font-mono text-[11px] text-acc shadow-[0_4px_16px_rgba(0,0,0,0.45)] lg:hidden"
                 onClick={() => setMobileView(mobileView === "chat" ? "panel" : "chat")}
