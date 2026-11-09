@@ -89,8 +89,7 @@ export interface BlogCommentDto {
   createdAt: number;
 }
 
+/** 发表评论：评论人身份取当前登录账号，不再接受客户端昵称 */
 export interface BlogCommentInput {
-  /** 游客必填昵称；登录用户可省略（v1 公开页均为游客评论） */
-  nickname?: string;
   content: string;
 }

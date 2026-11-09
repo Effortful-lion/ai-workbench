@@ -221,21 +221,32 @@ export class BlogService {
     return this.listComments(post.id, true);
   }
 
-  /** 游客评论：直接 approved（过审制留待后续配置），站内信通知作者 */
-  async addPublicComment(username: string, slug: string, input: BlogCommentInput): Promise<BlogCommentDto> {
+  /** 发表评论：公开可见、发表需登录；评论人取自登录账号（昵称 = username），直接 approved */
+  async addPublicComment(
+    username: string,
+    slug: string,
+    input: BlogCommentInput,
+    author: { id: string; username: string },
+  ): Promise<BlogCommentDto> {
     const owner = await this.mustUser(username);
     const [post] = await this.db
       .select()
       .from(blogPosts)
       .where(and(eq(blogPosts.ownerId, owner.id), eq(blogPosts.slug, slug)));
     if (!post || post.status !== "published") throw new NotFoundException("post not found");
-    const nickname = (input?.nickname ?? "").trim().slice(0, 24);
     const content = (input?.content ?? "").trim().slice(0, MAX_COMMENT);
-    if (!nickname) throw new BadRequestException("昵称不能为空");
     if (!content) throw new BadRequestException("评论内容不能为空");
+    const nickname = author.username;
     const [row] = await this.db
       .insert(blogComments)
-      .values({ id: randomUUID(), postId: post.id, userId: null, nickname, content, status: "approved" })
+      .values({
+        id: randomUUID(),
+        postId: post.id,
+        userId: author.id,
+        nickname,
+        content,
+        status: "approved",
+      })
       .returning();
     await this.notify
       .create(owner.id, {

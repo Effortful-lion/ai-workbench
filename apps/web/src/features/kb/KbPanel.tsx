@@ -169,25 +169,7 @@ export default function KbPanel() {
     }
   };
 
-  /** 移除：只删博客展示副本，KB 文档与向量不受影响 */
-  const doRemoveBlog = (link: BlogKbLinkDto) => {
-    useConfirmStore.getState().ask({
-      title: "从博客移除",
-      message: `《${link.title}》将从博客移除，评论一并删除；KB 文档与向量切片不受影响。`,
-      confirmText: "⏎ 确认移除",
-      danger: true,
-      onConfirm: () => {
-        void api(`/blog/posts/${link.postId}`, { method: "DELETE" }).then(() => {
-          setKbLinks((prev) => {
-            const next = new Map(prev);
-            next.delete(link.kbDocId);
-            return next;
-          });
-          setBulkNote(`✓ 《${link.title}》已从博客移除`);
-        });
-      },
-    });
-  };
+
 
   const viewOriginal = useCallback(async (doc: KbDocumentDto) => {
     setViewing(null);
@@ -948,11 +930,6 @@ export default function KbPanel() {
                               <Icon name="blog" size={10} /> 已发布
                             </span>
                           )}
-                          {kbLinks.get(d.id)?.status === "archived" && (
-                            <span className="flex items-center gap-0.5 text-warn/80">
-                              <Icon name="archive" size={10} /> 已下架
-                            </span>
-                          )}
                         </span>
                         {d.status === "error" && d.error && (
                           <span className="block truncate text-[10px] text-err">{d.error}</span>
@@ -970,57 +947,28 @@ export default function KbPanel() {
                           >
                             👁 原文
                           </button>
-                          {/* 博客动作组：发布/下架/上架/移除始终成对出现在同一位置 */}
+                          {/* 博客状态：只有两个操作——发布（无状态） / 下架（已发布） */}
                           {d.status === "embedded" && (() => {
                             const link = kbLinks.get(d.id);
-                            const openPublish = () => {
-                              setPubForm({ category: "essay", tags: "" });
-                              setPublishing({ id: d.id, title: d.title });
-                            };
                             if (link?.status === "published") {
                               return (
-                                <>
-                                  <button
-                                    className="flex items-center gap-1 text-[11px] text-tx3 hover:text-warn"
-                                    onClick={(e) => { e.stopPropagation(); void doSetBlogStatus(link, "archived"); }}
-                                    title="下架：公开页不再可见，评论保留"
-                                  >
-                                    <Icon name="archive" size={11} /> 下架
-                                  </button>
-                                  <button
-                                    className="flex items-center gap-1 text-[11px] text-tx3 hover:text-err"
-                                    onClick={(e) => { e.stopPropagation(); doRemoveBlog(link); }}
-                                    title="从博客移除：删除展示副本与评论，KB 文档不受影响"
-                                  >
-                                    <Icon name="trash" size={11} /> 移除
-                                  </button>
-                                </>
-                              );
-                            }
-                            if (link?.status === "archived") {
-                              return (
-                                <>
-                                  <button
-                                    className="flex items-center gap-1 text-[11px] text-tx3 hover:text-acc"
-                                    onClick={openPublish}
-                                    title="重新上架：按 KB 最新原文刷新后发布"
-                                  >
-                                    <Icon name="restore" size={11} /> 重新上架
-                                  </button>
-                                  <button
-                                    className="flex items-center gap-1 text-[11px] text-tx3 hover:text-err"
-                                    onClick={(e) => { e.stopPropagation(); doRemoveBlog(link); }}
-                                    title="从博客移除：删除展示副本与评论，KB 文档不受影响"
-                                  >
-                                    <Icon name="trash" size={11} /> 移除
-                                  </button>
-                                </>
+                                <button
+                                  className="flex items-center gap-1 text-[11px] text-tx3 hover:text-warn"
+                                  onClick={(e) => { e.stopPropagation(); void doSetBlogStatus(link, "archived"); }}
+                                  title="下架：公开页不再可见，回到无状态"
+                                >
+                                  <Icon name="archive" size={11} /> 下架
+                                </button>
                               );
                             }
                             return (
                               <button
                                 className="flex items-center gap-1 text-[11px] text-tx3 hover:text-acc"
-                                onClick={(e) => { e.stopPropagation(); openPublish(); }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setPubForm({ category: "essay", tags: "" });
+                                  setPublishing({ id: d.id, title: d.title });
+                                }}
                                 title="发布到博客（选分类/标签，slug 与摘要自动生成）"
                               >
                                 <Icon name="publish" size={11} /> 发布

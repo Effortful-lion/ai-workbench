@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { BlogCommentDto, BlogPublicPostDetailDto, BlogPublicPostDto } from "@aiwb/shared";
+import { api } from "../../lib/api";
 import { Icon } from "../../lib/icons";
+import { useAuthStore } from "../../stores/auth";
 import PublicBackLink from "../public/PublicBackLink";
 import BlogCardWall from "./BlogCardWall";
 import BlogReader from "./BlogReader";
 
 /** 游客公开博客：/b/:username（卡片墙）↔ /b/:username/:slug（FLIP 铺满的独立阅读页） */
 export default function PublicBlogPage({ username, slug }: { username: string; slug?: string }) {
+  const viewer = useAuthStore((s) => s.user);
   const [posts, setPosts] = useState<BlogPublicPostDto[] | null>(null);
   const [listError, setListError] = useState<string | null>(null);
   const [openSlug, setOpenSlug] = useState<string | null>(slug ?? null);
@@ -118,18 +121,13 @@ export default function PublicBlogPage({ username, slug }: { username: string; s
     window.history.pushState({ blog: s }, "", `/b/${encodeURIComponent(username)}/${encodeURIComponent(s)}`);
   };
 
-  const submitComment = async (input: { nickname: string; content: string }) => {
+  const submitComment = async (input: { content: string }) => {
     if (!openSlug) return;
-    const r = await fetch(`${postUrl(openSlug)}/comments`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(input),
-    });
-    if (!r.ok) {
-      const body = (await r.json().catch(() => ({}))) as { message?: string };
-      throw new Error(body.message ?? `HTTP ${r.status}`);
-    }
-    const c = (await r.json()) as BlogCommentDto;
+    // 评论发表需登录：api() 自动带 token 并处理 401 续期
+    const c = await api<BlogCommentDto>(
+      `/blog/public/${encodeURIComponent(username)}/${encodeURIComponent(openSlug)}/comments`,
+      { method: "POST", body: JSON.stringify(input) },
+    );
     setComments((prev) => [c, ...prev]);
     setPost((p) => (p ? { ...p, commentCount: p.commentCount + 1 } : p));
   };
@@ -188,6 +186,7 @@ export default function PublicBlogPage({ username, slug }: { username: string; s
               <BlogReader
                 post={post}
                 comments={comments}
+                author={viewer?.username ?? null}
                 onBack={close}
                 onNavigate={(s) => open(s)}
                 onSubmitComment={submitComment}

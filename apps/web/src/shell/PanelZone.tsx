@@ -47,13 +47,7 @@ export default function PanelZone() {
   if (!active) return null;
 
   return (
-    <div
-      className={
-        fullscreen
-          ? "fixed inset-0 z-20 flex flex-col bg-bg"
-          : "flex h-full min-w-0 flex-1 flex-col"
-      }
-    >
+    <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-bg">
       {/* tab 条 */}
       <div className="flex h-[38px] flex-none items-center justify-between border-b border-line bg-bg1 pr-2">
         <div className="flex h-full items-center overflow-x-auto">

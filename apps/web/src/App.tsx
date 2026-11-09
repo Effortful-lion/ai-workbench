@@ -24,6 +24,7 @@ export default function App() {
   const user = useAuthStore((s) => s.user);
   const { theme, cliOpen, setPalette, mobileView, setMobileView } = useUiStore();
   const panelCount = usePanelStore((s) => s.open.length);
+  const fullscreen = usePanelStore((s) => s.fullscreen);
   const currentId = useChatStore((s) => s.currentId);
   const pendingNew = useChatStore((s) => s.pendingNew);
   const connect = useChatStore((s) => s.connect);
@@ -96,11 +97,12 @@ export default function App() {
           <HeroState />
         ) : (
           <div className="flex h-full">
-            {/* 桌面端：聊天栏固定 400px 与面板同屏；移动端（<lg）：聊天/面板互斥全屏，由 mobileView 决定 */}
+            {/* 桌面端：聊天栏固定 400px 与面板同屏；移动端（<lg）：聊天/面板互斥全屏，由 mobileView 决定
+                面板全屏：只收起对话栏，保留顶部 header */}
             <div
               className={
                 panelCount > 0
-                  ? `${mobileView === "chat" ? "flex" : "hidden"} w-full flex-col border-line lg:flex lg:w-[400px] lg:flex-none lg:border-r`
+                  ? `${fullscreen ? "hidden" : mobileView === "chat" ? "flex" : "hidden"} w-full flex-col border-line lg:flex lg:w-[400px] lg:flex-none lg:border-r`
                   : "min-w-0 flex-1"
               }
             >

@@ -106,7 +106,10 @@ export default function BlogCardWall({ posts, onOpen, activeSlug, emptyText }: P
 
               <div className="mt-auto flex items-center gap-2.5 border-t border-dashed border-line pt-2 font-mono text-[9.5px] text-tx3">
                 <span>{formatDate(p.publishedAt)}</span>
-                <span className="h-[3px] min-w-0 flex-1 overflow-hidden rounded-sm bg-bg">
+                <span
+                  className="h-[3px] min-w-0 flex-1 overflow-hidden rounded-sm bg-bg"
+                  title={`字数刻度：本文 ${p.charCount} 字（相对列表最长一篇）`}
+                >
                   <span
                     className="block h-full rounded-sm bg-tx3/50 transition-colors group-hover:bg-acc"
                     style={{ width: `${tickWidth(p.charCount, maxChars)}%` }}

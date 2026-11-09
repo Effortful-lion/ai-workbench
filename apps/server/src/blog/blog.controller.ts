@@ -130,12 +130,15 @@ export class BlogController {
     return this.svc.publicComments(username, slug);
   }
 
+  /** 评论：公开可见，但发表需登录（身份取 token，不接受客户端昵称） */
   @Post("public/:username/:slug/comments")
+  @UseGuards(JwtAuthGuard)
   addPublicComment(
     @Param("username") username: string,
     @Param("slug") slug: string,
     @Body() body: BlogCommentInput,
+    @CurrentUser() user: AuthUser,
   ) {
-    return this.svc.addPublicComment(username, slug, body);
+    return this.svc.addPublicComment(username, slug, body, user);
   }
 }

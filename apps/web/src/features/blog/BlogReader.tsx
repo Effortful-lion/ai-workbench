@@ -10,14 +10,16 @@ interface Props {
   comments: BlogCommentDto[];
   onBack: () => void;
   onNavigate: (slug: string) => void;
-  onSubmitComment?: (input: { nickname: string; content: string }) => Promise<void>;
+  onSubmitComment?: (input: { content: string }) => Promise<void>;
+  /** 当前登录用户名：null/undefined = 未登录（评论区显示登录引导） */
+  author?: string | null;
   readOnlyComments?: boolean;
   embedded?: boolean;
 }
 
 /** 深度阅读页：顶栏 + 左目录 scrollspy + 680px 版心 + 上下篇 + 评论区 */
 export default function BlogReader({
-  post, comments, onBack, onNavigate, onSubmitComment, readOnlyComments, embedded,
+  post, comments, onBack, onNavigate, onSubmitComment, author, readOnlyComments, embedded,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const headings = useMemo(() => parseHeadings(post.contentMd), [post.contentMd]);
@@ -169,7 +171,12 @@ export default function BlogReader({
 
         {/* 评论 */}
         <div className="mt-10">
-          <CommentThread comments={comments} readOnly={readOnlyComments} onSubmit={onSubmitComment} />
+          <CommentThread
+            comments={comments}
+            author={author}
+            readOnly={readOnlyComments}
+            onSubmit={onSubmitComment}
+          />
         </div>
 
         {!embedded && (

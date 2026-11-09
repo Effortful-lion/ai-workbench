@@ -18,6 +18,19 @@ function greeting(): string {
   return "晚上好";
 }
 
+/** 首页提问历史：本地留存最近 6 条，点击可重发 */
+const HISTORY_KEY = "aiwb-hero-history";
+const HISTORY_MAX = 6;
+
+function loadHistory(): string[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem(HISTORY_KEY) ?? "[]");
+    return Array.isArray(raw) ? raw.filter((s): s is string => typeof s === "string").slice(0, HISTORY_MAX) : [];
+  } catch {
+    return [];
+  }
+}
+
 /** 状态 A · 对话态：招呼语 + 巨型输入框 + 动态 chips */
 export default function HeroState() {
   const user = useAuthStore((s) => s.user);
@@ -35,6 +48,26 @@ export default function HeroState() {
   const disconnect = useChatStore((s) => s.disconnect);
   const [text, setText] = useState("");
   const [modelCount, setModelCount] = useState<number | null>(null);
+  const [history, setHistory] = useState<string[]>(loadHistory);
+
+  const remember = (q: string) => {
+    const next = [q, ...history.filter((x) => x !== q)].slice(0, HISTORY_MAX);
+    setHistory(next);
+    try {
+      localStorage.setItem(HISTORY_KEY, JSON.stringify(next));
+    } catch {
+      // 隐私模式写入失败不影响提问
+    }
+  };
+
+  const clearHistory = () => {
+    setHistory([]);
+    try {
+      localStorage.removeItem(HISTORY_KEY);
+    } catch {
+      // 同上
+    }
+  };
 
   useEffect(() => {
     api<ModelDto[]>("/models")
@@ -44,8 +77,10 @@ export default function HeroState() {
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (!text.trim() || streaming) return;
-    send(text);
+    const q = text.trim();
+    if (!q || streaming) return;
+    remember(q);
+    send(q);
     setText("");
   };
 
@@ -97,6 +132,7 @@ export default function HeroState() {
     { label: "执行历史", run: () => openPanel("history") },
     { label: "访问统计", run: () => openPanel("stats") },
     { label: "知识库", run: () => openPanel("kb") },
+    { label: "博客", run: () => openPanel("blog") },
     { label: "项目管理", run: () => openPanel("projects") },
     { label: "代码管理", run: () => openPanel("code") },
     { label: "日程管理", run: () => openPanel("cal") },
@@ -114,11 +150,6 @@ export default function HeroState() {
 
   /** MinIO Web 控制台入口：按当前 host 推导（端口 9701），让用户知道工作台自带对象存储 */
   const minioConsoleUrl = `${window.location.protocol}//${window.location.hostname}:9701`;
-
-  const questions: { label: string; run: () => void }[] = [
-    { label: "你能做什么？", run: () => send("你能做什么？") },
-    { label: "介绍一下这个工作台", run: () => send("介绍一下这个工作台") },
-  ];
 
   return (
     // 外层负责滚动：横屏（视口矮）内容超出一屏时可上下滚动；内层 min-h-full 保证内容短时仍垂直居中
@@ -193,20 +224,35 @@ export default function HeroState() {
           </div>
         </section>
 
-        <section>
-          <h2 className="mb-2.5 font-mono text-[11px] text-tx3">// 猜你想问</h2>
-          <div className="flex flex-wrap gap-2">
-            {questions.map((c) => (
+        {history.length > 0 && (
+          <section>
+            <div className="mb-2.5 flex items-center gap-2">
+              <h2 className="font-mono text-[11px] text-tx3">// 最近提问</h2>
               <button
-                key={c.label}
-                className="rounded border border-line bg-bg1 px-3 py-1.5 font-mono text-[12px] text-tx2 transition-colors hover:border-acc hover:text-acc"
-                onClick={c.run}
+                className="font-mono text-[10px] text-tx3 transition-colors hover:text-err"
+                onClick={clearHistory}
+                title="清空本地提问历史"
               >
-                {c.label}
+                清空
               </button>
-            ))}
-          </div>
-        </section>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {history.map((q) => (
+                <button
+                  key={q}
+                  className="group flex max-w-full items-center gap-1.5 rounded border border-line bg-bg1 px-3 py-1.5 font-mono text-[12px] text-tx2 transition-colors hover:border-acc hover:text-acc"
+                  onClick={() => {
+                    remember(q);
+                    send(q);
+                  }}
+                  title={`再次提问：${q}`}
+                >
+                  <span className="truncate">{q}</span>
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
       </div>
       </div>
     </div>
