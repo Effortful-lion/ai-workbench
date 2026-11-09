@@ -153,10 +153,11 @@ export default function HeroState() {
             />
             <kbd className="rounded border border-line px-1.5 py-0.5 font-mono text-[10px] text-tx3">⏎</kbd>
           </div>
-          <CommandSuggest text={text} onPick={handleCmd} onClose={() => setText("")} />
+          {/* 首页输入框在页面中部，命令列表向下展开 */}
+          <CommandSuggest text={text} onPick={handleCmd} onClose={() => setText("")} direction="down" />
         </div>
         {/* 模型选择：注释行风格，与聊天栏共用 store 状态 */}
-        <div className="mt-2 flex flex-col items-start gap-2 font-mono text-[11px]">
+        <div className="mt-2 flex flex-col items-start gap-1.5 font-mono text-[11px]">
           {/* 注释行在上 */}
           <div className="text-tx3">// 模型 ◎ 自动 = 服务端默认 · 与聊天栏联动</div>
           {/* ModelPicker 独占一行 */}

@@ -7,10 +7,12 @@ interface Props {
   onPick: (cmd: Command) => void;
   /** Enter 直接发送（不走命令）的回调 */
   onClose?: () => void;
+  /** 浮层方向：up=向上（默认，聊天栏输入框贴屏幕底）/ down=向下（首页 Hero 输入框在页面中部） */
+  direction?: "up" | "down";
 }
 
-/** 输入框上方的斜杠命令下拉。输入 "/" 时向上浮现（输入框在屏幕底部，向下展开会被裁掉），↑↓ 选择，Enter 确认，Esc 关闭 */
-export default function CommandSuggest({ text, onPick, onClose }: Props) {
+/** 斜杠命令下拉：输入 "/" 时按 direction 浮现，↑↓ 选择，Enter 确认，Esc 关闭 */
+export default function CommandSuggest({ text, onPick, onClose, direction = "up" }: Props) {
   const [active, setActive] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -58,7 +60,11 @@ export default function CommandSuggest({ text, onPick, onClose }: Props) {
   return (
     <div
       ref={listRef}
-      className="absolute bottom-full left-0 right-0 z-20 mb-1 max-h-[320px] overflow-auto rounded-lg border border-acc/60 bg-bg1 shadow-[0_-8px_24px_rgba(0,0,0,0.4)]"
+      className={`absolute left-0 right-0 z-20 max-h-[320px] overflow-auto rounded-lg border border-acc/60 bg-bg1 ${
+        direction === "up"
+          ? "bottom-full mb-1 shadow-[0_-8px_24px_rgba(0,0,0,0.4)]"
+          : "top-full mt-1 shadow-[0_8px_24px_rgba(0,0,0,0.4)]"
+      }`}
     >
       {filtered.map((c, i) => (
         <button
