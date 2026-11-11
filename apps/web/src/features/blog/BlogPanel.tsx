@@ -6,6 +6,7 @@ import type {
 import { api } from "../../lib/api";
 import { Icon } from "../../lib/icons";
 import { usePanelStore } from "../../stores/panel";
+import { useAuthStore } from "../../stores/auth";
 import BlogCardWall from "./BlogCardWall";
 import BlogReader from "./BlogReader";
 import { CATEGORY_META, formatDate, formatDateTime } from "./blogUtils";
@@ -20,13 +21,20 @@ const STATUS_META: Record<BlogCommentStatus, { label: string; cls: string }> = {
 };
 
 /**
- * 博客面板：文章只读（发布/下架在 KB），评论审核在此（评论属于博客自身职责）。
+ * 博客面板：文章内容只读（发布/下架在 KB），评论区可直接发言，
+ * 评论审核也在此（评论属于博客自身职责）。
  */
 export default function BlogPanel() {
   const openPanel = usePanelStore((s) => s.openPanel);
+  const viewer = useAuthStore((s) => s.user);
+  // 文章与评论审核都归站点主人；普通用户只看文章（讨论在公开页进行）
+  const canWrite = useAuthStore((s) => s.user?.role === "owner");
   // 公开页「去审核」带 ?tab=moderation 整页跳转进来，直接落到审核 tab
   const [tab, setTab] = useState<Tab>(() =>
-    new URLSearchParams(window.location.search).get("tab") === "moderation" ? "moderation" : "posts",
+    useAuthStore.getState().user?.role === "owner" &&
+    new URLSearchParams(window.location.search).get("tab") === "moderation"
+      ? "moderation"
+      : "posts",
   );
 
   useEffect(() => {
@@ -63,8 +71,9 @@ export default function BlogPanel() {
 
   useEffect(() => {
     void reload();
-    void reloadQueue("pending");
-  }, [reload, reloadQueue]);
+    // 审核队列仅站点主人可读
+    if (canWrite) void reloadQueue("pending");
+  }, [reload, reloadQueue, canWrite]);
 
   // 阅读某篇：正文评论（只展示已通过）
   useEffect(() => {
@@ -160,13 +169,29 @@ export default function BlogPanel() {
     }
   };
 
+  /** 面板内发表评论：登录即可评论；待审评论不立即上屏，与公开页规则一致 */
+  const submitComment = async (input: { content: string; parentId?: string | null }) => {
+    if (!openId) throw new Error("文章未打开");
+    const c = await api<BlogCommentDto>(`/blog/posts/${openId}/comments`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+    if (c.status === "approved") {
+      const d = await api<BlogCommentDto[]>(`/blog/posts/${openId}/comments`).catch(() => []);
+      setComments(d);
+      void reload();
+    }
+    return c;
+  };
+
   if (openId && detail) {
     return (
       <BlogReader
         embedded
-        readOnlyComments
         post={detail}
         comments={commentPage}
+        author={viewer?.username ?? null}
+        onSubmitComment={submitComment}
         onBack={() => setOpenId(null)}
         onNavigate={(s) => {
           const hit = posts?.find((p) => p.slug === s);
@@ -185,13 +210,15 @@ export default function BlogPanel() {
           博客
         </span>
         <span className="text-tx3">// 文章内容与发布/下架在知识库完成；评论审核在此</span>
-        <button
-          className="ml-auto flex items-center gap-1.5 rounded border border-acc/40 px-2 py-0.5 text-acc transition-colors hover:border-acc hover:bg-acc/10"
-          onClick={() => openPanel("kb")}
-        >
-          <Icon name="doc" size={11} />
-          去知识库
-        </button>
+        {canWrite && (
+          <button
+            className="ml-auto flex items-center gap-1.5 rounded border border-acc/40 px-2 py-0.5 text-acc transition-colors hover:border-acc hover:bg-acc/10"
+            onClick={() => openPanel("kb")}
+          >
+            <Icon name="doc" size={11} />
+            去知识库
+          </button>
+        )}
       </div>
 
       {/* Tab：文章 / 评论审核 */}
@@ -205,21 +232,23 @@ export default function BlogPanel() {
           <Icon name="blog" size={12} />
           文章
         </button>
-        <button
-          className={`-mb-px flex items-center gap-1.5 border-b px-3 py-1.5 transition-colors ${
-            tab === "moderation" ? "border-acc text-acc" : "border-transparent text-tx3 hover:text-tx2"
-          }`}
-          onClick={() => {
-            setTab("moderation");
-            void reloadQueue(filter);
-          }}
-        >
-          <Icon name="comment" size={12} />
-          评论审核
-          {pendingCount > 0 && (
-            <span className="rounded bg-warn/15 px-1 text-[9.5px] text-warn">{pendingCount}</span>
-          )}
-        </button>
+        {canWrite && (
+          <button
+            className={`-mb-px flex items-center gap-1.5 border-b px-3 py-1.5 transition-colors ${
+              tab === "moderation" ? "border-acc text-acc" : "border-transparent text-tx3 hover:text-tx2"
+            }`}
+            onClick={() => {
+              setTab("moderation");
+              void reloadQueue(filter);
+            }}
+          >
+            <Icon name="comment" size={12} />
+            评论审核
+            {pendingCount > 0 && (
+              <span className="rounded bg-warn/15 px-1 text-[9.5px] text-warn">{pendingCount}</span>
+            )}
+          </button>
+        )}
       </div>
 
       {error && <div className="mb-2 rounded border border-err/40 bg-err/5 px-3 py-1.5 text-[11px] text-err">✗ {error}</div>}
@@ -228,9 +257,9 @@ export default function BlogPanel() {
         <>
           <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-tx3">
             <span>
-              已发布 {(posts ?? []).filter((p) => p.status === "published").length} ·
-              已下架 {(posts ?? []).filter((p) => p.status === "archived").length} ·
-              合计 {(posts ?? []).length}
+              已发布 {(posts ?? []).filter((p) => p.status === "published").length}
+              {canWrite && ` · 已下架 ${(posts ?? []).filter((p) => p.status === "archived").length}`}
+              {" · "}合计 {(posts ?? []).length}
             </span>
             <span className="flex items-center gap-1">
               <Icon name="clock" size={10} />

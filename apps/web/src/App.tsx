@@ -1,9 +1,9 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useAuthStore } from "./stores/auth";
+import { refreshSession } from "./lib/api";
 import { useChatStore } from "./stores/chat";
 import { usePanelStore } from "./stores/panel";
 import { useUiStore } from "./stores/ui";
-import LoginScreen from "./features/auth/LoginScreen";
 import TopBar from "./shell/TopBar";
 import StatusBar from "./shell/StatusBar";
 import HeroState from "./shell/HeroState";
@@ -22,20 +22,55 @@ import { useHashRoute } from "./lib/route";
 
 export default function App() {
   const user = useAuthStore((s) => s.user);
+  const accessToken = useAuthStore((s) => s.accessToken);
   const { theme, cliOpen, setPalette, mobileView, setMobileView } = useUiStore();
   const panelCount = usePanelStore((s) => s.open.length);
   const fullscreen = usePanelStore((s) => s.fullscreen);
   const currentId = useChatStore((s) => s.currentId);
   const pendingNew = useChatStore((s) => s.pendingNew);
   const connect = useChatStore((s) => s.connect);
+  // 刷新页面后 accessToken 只在内存里，先静默换票再渲染，避免首屏一堆 401
+  const [booting, setBooting] = useState(() => Boolean(useAuthStore.getState().user));
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
 
   useEffect(() => {
-    if (user) connect();
-  }, [user, connect]);
+    const { user: cached, accessToken: token } = useAuthStore.getState();
+    if (!cached || token) {
+      setBooting(false);
+      return;
+    }
+    let alive = true;
+    void refreshSession().then((ok) => {
+      if (!alive) return;
+      if (!ok) useAuthStore.getState().clear();
+      setBooting(false);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    // 有用户且拿到票据后再连 Socket（握手要用 accessToken）
+    if (user && accessToken) connect();
+  }, [user, accessToken, connect]);
+
+  // 浏览器「后退」命中 bfcache 时页面不会重新初始化，内存里的 store 还是离开前的旧值：
+  // 登录后在公开页返回首页却显示成游客就是这个原因。恢复时按 localStorage 重新水合并续票。
+  useEffect(() => {
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (!e.persisted) return;
+      void Promise.resolve(useAuthStore.persist.rehydrate()).then(() => {
+        const { user: restored, accessToken: token } = useAuthStore.getState();
+        if (restored && !token) void refreshSession();
+      });
+    };
+    window.addEventListener("pageshow", onPageShow);
+    return () => window.removeEventListener("pageshow", onPageShow);
+  }, []);
 
   // 移动端：打开面板自动切到面板视图，全部关闭回到对话视图（桌面端始终同屏，忽略此状态）
   useEffect(() => {
@@ -45,6 +80,8 @@ export default function App() {
   // ⌘K 全局唤起
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
+      // 游客没有命令面板（面板与命令都要求登录）
+      if (!useAuthStore.getState().user) return;
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setPalette(!useUiStore.getState().paletteOpen);
@@ -82,7 +119,28 @@ export default function App() {
     if (blogUser) return <PublicBlogPage username={blogUser} slug={blogSlug ?? undefined} />;
   }
 
-  if (!user) return <LoginScreen />;
+  // 换票期间不渲染登录页，否则会闪一下「请登录」
+  if (booting) {
+    return (
+      <div className="grid-bg flex h-full items-center justify-center font-mono text-[12px] text-tx3">
+        ▸ 正在恢复会话…
+      </div>
+    );
+  }
+
+  // 游客：直接进首页（只读形态）。AI 对话 / 面板 / 命令等受限入口点击时弹登录浮层
+  if (!user) {
+    return (
+      <div className="grid-bg flex h-full flex-col">
+        <TopBar />
+        <main className="min-h-0 flex-1">
+          <HeroState />
+        </main>
+        <StatusBar mode="A" />
+        <ToastHost />
+      </div>
+    );
+  }
 
   // 三态：C 沉浸（CLI 覆盖） / B 工作（对话列+面板） / A 对话（首页 hero）
   const mode = cliOpen ? "C" : currentId || pendingNew || panelCount > 0 ? "B" : "A";

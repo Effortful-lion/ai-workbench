@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuthStore } from "../stores/auth";
 import { useChatStore } from "../stores/chat";
 import { PANEL_META, usePanelStore, type PanelId } from "../stores/panel";
+import { canOpenPanel } from "../lib/panel-access";
 import { useUiStore } from "../stores/ui";
 import { useConfirmStore } from "../stores/confirm";
 
@@ -20,17 +21,21 @@ export default function CommandPalette() {
   const { openPanel, closeAll } = usePanelStore();
   const { send, newChat, disconnect } = useChatStore();
   const clearAuth = useAuthStore((s) => s.clear);
+  const role = useAuthStore((s) => s.user?.role);
   const [q, setQ] = useState("");
   const [ix, setIx] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const commands = useMemo<Cmd[]>(() => {
-    const nav: Cmd[] = (Object.keys(PANEL_META) as PanelId[]).map((id) => ({
-      kind: "导航",
-      label: `打开${PANEL_META[id].title}`,
-      keywords: `${id} ${PANEL_META[id].path} open`,
-      run: () => openPanel(id),
-    }));
+    // 危险面板（模型/邮件/自定义工具）不进命令面板，普通用户看不到入口
+    const nav: Cmd[] = (Object.keys(PANEL_META) as PanelId[])
+      .filter((id) => canOpenPanel(id, role))
+      .map((id) => ({
+        kind: "导航",
+        label: `打开${PANEL_META[id].title}`,
+        keywords: `${id} ${PANEL_META[id].path} open`,
+        run: () => openPanel(id),
+      }));
     const actions: Cmd[] = [
       { kind: "动作", label: "新对话", keywords: "new chat", run: () => newChat() },
       {
@@ -63,7 +68,7 @@ export default function CommandPalette() {
       },
     ];
     return [...nav, ...actions];
-  }, [openPanel, newChat, closeAll, setCli, toggleTheme, clearAuth, disconnect]);
+  }, [openPanel, newChat, closeAll, setCli, toggleTheme, clearAuth, disconnect, role]);
 
   const filtered = useMemo(() => {
     const t = q.trim().toLowerCase();

@@ -215,6 +215,8 @@ export interface MailSyncResult {
   classified: number;
   /** 同步失败的账户数 */
   failed: number;
+  /** 单封邮件解析/落库失败而被跳过的数量（不中断整批） */
+  parseErrors?: number;
   details: { account: string; created: number; error?: string }[];
 }
 

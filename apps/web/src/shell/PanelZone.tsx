@@ -1,4 +1,6 @@
 import type { ReactNode } from "react";
+import { useAuthStore } from "../stores/auth";
+import { canOpenPanel } from "../lib/panel-access";
 import ModelsPanel from "../features/models/ModelsPanel";
 import AgentsPanel from "../features/agents/AgentsPanel";
 import KbPanel from "../features/kb/KbPanel";
@@ -44,6 +46,7 @@ const PANEL_BODY: Record<PanelId, () => ReactNode> = {
 /** 状态 B · 面板区：tabs + 内容 + ⤢ 全屏 */
 export default function PanelZone() {
   const { open, active, fullscreen, activate, closePanel, toggleFullscreen } = usePanelStore();
+  const role = useAuthStore((s) => s.user?.role);
   if (!active) return null;
 
   return (
@@ -85,8 +88,17 @@ export default function PanelZone() {
           {fullscreen ? "⤡" : "⤢"}
         </button>
       </div>
-      {/* 内容 */}
-      <div className="min-h-0 flex-1 overflow-y-auto">{PANEL_BODY[active]()}</div>
+      {/* 内容：危险面板（模型/邮件/自定义工具）只允许站点主人打开 */}
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {canOpenPanel(active, role) ? (
+          PANEL_BODY[active]()
+        ) : (
+          <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center font-mono text-[12px] text-tx3">
+            <div className="text-[13px] text-err">✗ {PANEL_META[active].title} 仅站点主人可用</div>
+            <div>// 该模块涉及凭证或高权限操作，普通账号只读展示其余内容</div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

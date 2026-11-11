@@ -27,7 +27,7 @@ export class ResumeController {
   /** 本人档案卡（登录可见） */
   @Get("me")
   @UseGuards(JwtAuthGuard, PermissionGuard)
-  @RequirePerm("me:read")
+  @RequirePerm("resume:read")
   getMe(@CurrentUser() user: AuthUser) {
     return this.svc.getOwn(user);
   }
@@ -35,7 +35,7 @@ export class ResumeController {
   /** 仅 owner 可写；member 的简历按原型 ACL 保持只读 */
   @Put("me")
   @UseGuards(JwtAuthGuard, PermissionGuard)
-  @RequirePerm("me:write")
+  @RequirePerm("resume:write")
   update(@CurrentUser() user: AuthUser, @Body() body: unknown) {
     return this.svc.update(user.id, body);
   }
@@ -43,7 +43,7 @@ export class ResumeController {
   /** 上传简历文件（pdf/docx/txt/md）→ 解析成档案卡结构，不落库 */
   @Post("import")
   @UseGuards(JwtAuthGuard, PermissionGuard)
-  @RequirePerm("me:write")
+  @RequirePerm("resume:write")
   @UseInterceptors(FileInterceptor("file", { limits: { fileSize: MAX_UPLOAD_BYTES } }))
   async importFile(
     @CurrentUser() user: AuthUser,
@@ -57,7 +57,7 @@ export class ResumeController {
   /** 直接粘贴文本 → 解析成档案卡结构，不落库 */
   @Post("parse")
   @UseGuards(JwtAuthGuard, PermissionGuard)
-  @RequirePerm("me:write")
+  @RequirePerm("resume:write")
   parseText(@CurrentUser() user: AuthUser, @Body() body: { text?: unknown }) {
     const text = typeof body?.text === "string" ? body.text : "";
     if (!text.trim()) throw new BadRequestException("text 不能为空");

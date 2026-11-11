@@ -77,7 +77,7 @@ type Tab = "chat" | "docs";
 export default function KbPanel() {
   const role = useAuthStore((s) => s.user?.role ?? "guest");
   // 与 ModelsPanel 一致：写操作仅 owner/member；服务端仍以 kb:write 权限兜底
-  const canWrite = role === "owner" || role === "member";
+  const canWrite = role === "owner"; // 个人站：知识库属于站点主人，注册用户只读
 
   const [tab, setTab] = useState<Tab>("chat");
   const [docs, setDocs] = useState<KbDocumentDto[]>([]);

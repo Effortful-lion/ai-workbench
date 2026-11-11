@@ -1,0 +1,24 @@
+- generic [ref=e3]:
+  - generic [ref=e4]: AI-WORKBENCH
+  - generic [ref=e5]:
+    - generic [ref=e6]:
+      - generic [ref=e7]: ●
+      - generic [ref=e8]: ●
+      - generic [ref=e9]: ●
+      - generic [ref=e10]: ~/auth/login
+    - generic [ref=e11]:
+      - generic [ref=e12]:
+        - generic [ref=e13]: "user:"
+        - textbox "user:" [active] [ref=e14]:
+          - /placeholder: 账号名或邮箱
+      - generic [ref=e15]:
+        - generic [ref=e16]: "pass:"
+        - textbox "pass:" [ref=e17]:
+          - /placeholder: ""
+      - button "⏎ login" [disabled] [ref=e18]
+  - generic [ref=e19]:
+    - button "没有账号？→ register" [ref=e20]
+    - generic [ref=e21]: "|"
+    - button "◐ ~/theme dark" [ref=e22]:
+      - generic [ref=e23]: ◐
+      - generic [ref=e24]: ~/theme dark

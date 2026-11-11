@@ -7,13 +7,16 @@ import type {
   NotificationDigestDto,
   OwnContactDto,
 } from "@aiwb/shared";
-import { useAuthStore } from "../stores/auth";
+import { displayName, useAuthStore } from "../stores/auth";
 import { useChatStore } from "../stores/chat";
 import { usePanelStore } from "../stores/panel";
 import { useUiStore } from "../stores/ui";
 import { useToastStore } from "../stores/toast";
 import { useConfirmStore } from "../stores/confirm";
 import { api } from "../lib/api";
+import { Icon } from "../lib/icons";
+import { useAuthModal } from "../stores/auth-modal";
+import NicknameDialog from "./NicknameDialog";
 
 const CONTACT_LABEL: Record<ContactChannelType, string> = {
   email: "邮箱",
@@ -34,16 +37,20 @@ const CONTACT_ICON: Record<ContactChannelType, string> = {
 };
 
 export default function TopBar() {
-  const { user, refreshToken, clear } = useAuthStore();
+  const { user, clear } = useAuthStore();
   const { theme, toggleTheme, setPalette } = useUiStore();
   const connected = useChatStore((s) => s.connected);
   const disconnect = useChatStore((s) => s.disconnect);
   const closeAll = usePanelStore((s) => s.closeAll);
   const openPanel = usePanelStore((s) => s.openPanel);
+  const requireLogin = useAuthModal((s) => s.requireLogin);
   const [unread, setUnread] = useState(0);
   const [mailUnread, setMailUnread] = useState(0);
+  const [nickOpen, setNickOpen] = useState(false);
+  // 邮件管理归站点主人，普通用户不轮询也不显示入口
+  const isOwner = user?.role === "owner";
 
-  // 红点：轮询站内信 / 邮件未读数；邮件面板每次刷新摘要会广播 aiwb:mail-changed，即时同步
+  // 红点：轮询站内信 / 邮件未读数；面板刷新摘要会广播 aiwb:notify-changed / aiwb:mail-changed，即时同步
   useEffect(() => {
     if (!user) {
       setUnread(0);
@@ -59,6 +66,7 @@ export default function TopBar() {
         .catch(() => {
           if (alive) setUnread(0);
         });
+      if (!isOwner) return;
       api<MailDigestDto>("/mail/digest")
         .then((d) => {
           if (alive) setMailUnread(d.unread);
@@ -71,13 +79,23 @@ export default function TopBar() {
       const n = (e as CustomEvent<{ unread?: number }>).detail?.unread;
       if (typeof n === "number") setMailUnread(n);
     };
+    // 站内信面板读/删/全部已读后广播，红点无需等下一轮轮询
+    const onNotifyChanged = (e: Event) => {
+      const n = (e as CustomEvent<{ unread?: number }>).detail?.unread;
+      if (typeof n === "number") setUnread(n);
+    };
     void load();
     window.addEventListener("aiwb:mail-changed", onMailChanged);
+    window.addEventListener("aiwb:notify-changed", onNotifyChanged);
+    // 切回页面时立即校准（在别的窗口/标签里读过站内信也能马上消红点）
+    window.addEventListener("focus", load);
     const timer = window.setInterval(load, 60_000);
     return () => {
       alive = false;
       window.clearInterval(timer);
+      window.removeEventListener("focus", load);
       window.removeEventListener("aiwb:mail-changed", onMailChanged);
+      window.removeEventListener("aiwb:notify-changed", onNotifyChanged);
     };
   }, [user]);
 
@@ -89,13 +107,53 @@ export default function TopBar() {
 
   const logout = async () => {
     try {
-      await api("/auth/logout", { method: "POST", body: JSON.stringify({ refreshToken }) });
+      // refresh token 在 httpOnly Cookie 里，服务端按 Cookie 注销并清除
+      await api("/auth/logout", { method: "POST", body: "{}" });
     } finally {
       disconnect();
       closeAll();
       clear();
     }
   };
+
+  // 游客顶栏：只保留品牌、主题与登录入口；站内信/邮件/昵称都要求登录
+  if (!user) {
+    return (
+      <header className="flex h-[52px] flex-none items-center justify-between border-b border-line px-4 font-mono">
+        <button
+          onClick={home}
+          title="回到首页"
+          className="flex items-center text-[13px] font-bold tracking-wider transition-colors hover:text-acc"
+        >
+          <img
+            src="/icons/icon-32.png"
+            alt=""
+            className="mr-2 h-[18px] w-[18px] rounded-[3px] border border-line"
+          />
+          AI-WORKBENCH
+          <span className="ml-2 hidden text-[10px] font-normal text-tx3 sm:inline">v0.1</span>
+        </button>
+        <div className="flex items-center gap-1.5 text-[11px] sm:gap-3">
+          <span className="hidden text-[10px] text-tx3 sm:inline">只读浏览</span>
+          <button
+            className="flex h-[26px] items-center justify-center rounded border border-line px-2 py-1 hover:border-acc hover:text-acc"
+            onClick={toggleTheme}
+            title="切换主题色系"
+          >
+            {theme === "dark" ? "◐" : "◑"}
+          </button>
+          <button
+            className="flex h-[26px] items-center gap-1.5 rounded border border-acc/50 px-2.5 py-1 text-acc transition-colors hover:border-acc hover:bg-acc/10"
+            onClick={() => requireLogin("登录后可开始对话、使用面板与发表评论")}
+            title="登录 / 注册"
+          >
+            登录 / 注册
+            <Icon name="next" size={11} />
+          </button>
+        </div>
+      </header>
+    );
+  }
 
   return (
     <header className="flex h-[52px] flex-none items-center justify-between border-b border-line px-4 font-mono">
@@ -120,6 +178,7 @@ export default function TopBar() {
         >
           <span className="text-acc">⌘</span>K
         </button>
+        {isOwner && (
         <button
           className="relative flex h-[26px] items-center justify-center rounded border border-line px-2 py-1 hover:border-acc hover:text-acc"
           onClick={() => openPanel("mail")}
@@ -144,6 +203,8 @@ export default function TopBar() {
             </span>
           )}
         </button>
+        )}
+        {/* 联系方式属于站点主人：所有登录用户都能看到「如何联系我」 */}
         {user && <ContactBadge username={user.username} />}
         <button
           className="relative flex h-[26px] items-center justify-center rounded border border-line px-2 py-1 hover:border-acc hover:text-acc"
@@ -179,10 +240,14 @@ export default function TopBar() {
         >
           {theme === "dark" ? "◐" : "◑"}
         </button>
-        <span className="hidden h-[26px] items-center rounded border border-line px-2 py-1 md:flex">
-          <span className="text-acc">{user?.username}</span>
+        <button
+          className="hidden h-[26px] items-center rounded border border-line px-2 py-1 hover:border-acc md:flex"
+          onClick={() => setNickOpen(true)}
+          title={`${displayName(user)} · @${user?.username ?? ""} · 点击修改昵称`}
+        >
+          <span className="max-w-[120px] truncate text-acc">{displayName(user)}</span>
           <span className="text-tx3"> [{user?.role}]</span>
-        </span>
+        </button>
         <button
           className="flex h-[26px] items-center justify-center rounded border border-line px-2 py-1 hover:border-err hover:text-err"
           onClick={() =>
@@ -198,6 +263,7 @@ export default function TopBar() {
           ✗
         </button>
       </div>
+      {nickOpen && <NicknameDialog onClose={() => setNickOpen(false)} />}
     </header>
   );
 }
@@ -206,6 +272,8 @@ export default function TopBar() {
 function ContactBadge({ username }: { username: string }) {
   const [open, setOpen] = useState(false);
   const [contact, setContact] = useState<ContactProfile | null>(null);
+  // /profile/contact 对普通用户返回的是站点主人的资料，跳转要用它的 username
+  const [page, setPage] = useState(username);
   // 触屏没有 hover：不做预览，点击直接进公开页
   const [coarse] = useState(() =>
     typeof window !== "undefined" && typeof window.matchMedia === "function"
@@ -218,7 +286,9 @@ function ContactBadge({ username }: { username: string }) {
     let alive = true;
     api<OwnContactDto>("/profile/contact")
       .then((d) => {
-        if (alive) setContact(d.contact);
+        if (!alive) return;
+        setContact(d.contact);
+        if (d.username) setPage(d.username);
       })
       .catch(() => {
         // 读取失败静默：预览卡退回默认文案，公开页仍可正常打开
@@ -238,7 +308,7 @@ function ContactBadge({ username }: { username: string }) {
   }, [open]);
 
   const go = () => {
-    window.location.href = `/c/${encodeURIComponent(username)}`;
+    window.location.href = `/c/${encodeURIComponent(page)}`;
   };
 
   const copy = (text: string) => {
@@ -313,7 +383,7 @@ function ContactBadge({ username }: { username: string }) {
         >
           <div className="flex items-center justify-between gap-2">
             <span className="text-[10px] tracking-wider text-tx3">如何联系我</span>
-            <span className="text-[9px] text-tx3">/c/{username} ↗</span>
+            <span className="text-[9px] text-tx3">/c/{page} ↗</span>
           </div>
 
           <div className="mt-2 rounded border border-acc/20 bg-acc/5 px-2.5 py-2 text-[10px] text-tx2">

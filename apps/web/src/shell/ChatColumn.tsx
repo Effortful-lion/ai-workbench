@@ -27,15 +27,17 @@ export default function ChatColumn() {
     send, stop, openConversation, removeConversation, newChat, startAgentChat, setModel,
   } = useChatStore();
   const { agents, load: loadAgents } = useAgentsStore();
+  // 助手列表属于 admin 的管理数据；模型列表对普通用户开放（只能选，不能管）
+  const isOwner = useAuthStore((s) => s.user?.role === "owner");
   const [models, setModels] = useState<ModelDto[]>([]);
   const [text, setText] = useState("");
   const [showHistory, setShowHistory] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    void loadAgents();
     void api<ModelDto[]>("/models").then(setModels).catch(() => setModels([]));
-  }, [loadAgents]);
+    if (isOwner) void loadAgents();
+  }, [loadAgents, isOwner]);
 
   // 当前会话绑定的 Agent（新会话看 pending，已有会话看绑定）
   const currentAgentId = currentId
@@ -226,13 +228,13 @@ export default function ChatColumn() {
         </div>
       </div>
 
-      {/* 输入框 */}
-      <form onSubmit={submit} className="flex-none border-t border-line p-3">
-        <div className="relative mx-auto flex max-w-[760px] items-center gap-2 rounded border border-line bg-bg1 px-3 py-2.5 focus-within:border-acc">
-          <span className="font-mono text-acc">▸</span>
+      {/* 输入框：沿用原型 .box —— 8px 圆角 / 16px 内边距 / 聚焦绿环光晕 / 右侧键帽 */}
+      <form onSubmit={submit} className="flex-none border-t border-line px-3.5 pb-4 pt-3">
+        <div className="relative mx-auto flex max-w-[760px] items-center gap-2.5 rounded-lg border border-line bg-bg1 px-4 py-4 transition-[border-color,box-shadow] duration-150 focus-within:border-acc focus-within:shadow-[var(--glow)]">
+          <span className="flex-none font-mono text-[14px] text-acc">›</span>
           <input
-            className="flex-1 bg-transparent font-mono text-[13px] text-tx outline-none placeholder:text-tx3"
-            placeholder={streaming ? "AI 正在输出…" : "继续对话…（⏎ 发送，输入 / 调命令）"}
+            className="flex-1 bg-transparent font-mono text-[14px] text-tx caret-acc outline-none placeholder:text-tx3"
+            placeholder={streaming ? "AI 正在输出…" : "继续对话，或 / 调用能力…"}
             value={text}
             onChange={(e) => setText(e.target.value)}
             disabled={streaming}
@@ -247,7 +249,14 @@ export default function ChatColumn() {
               ■ 停止
             </button>
           ) : (
-            <span className="font-mono text-[10px] text-tx3">⏎</span>
+            <>
+              <kbd className="flex-none rounded border border-line px-1.5 py-[3px] font-mono text-[10.5px] text-tx3">
+                ⏎
+              </kbd>
+              <kbd className="flex-none rounded border border-line px-1.5 py-[3px] font-mono text-[10.5px] text-tx3">
+                ⌘K
+              </kbd>
+            </>
           )}
           <CommandSuggest text={text} onPick={handleCmd} onClose={() => setText("")} />
         </div>

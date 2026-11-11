@@ -36,6 +36,7 @@ import {
 import { AgentsService } from "../agents/agents.service";
 import { ToolRegistry } from "../tools/tool-registry.service";
 import { CapabilityService, type RouteResult } from "../capability/capability.service";
+import { WorkspaceOwner } from "../common/workspace-owner";
 
 /** 单轮对话中「唯一工具 + 参数」调用上限，防死循环；重复调用走缓存不占预算 */
 const MAX_TOOL_CALLS = 20;
@@ -145,6 +146,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly registry: ToolRegistry,
     private readonly trace: TraceService,
     private readonly capability: CapabilityService,
+    private readonly owner: WorkspaceOwner,
   ) {}
 
   async handleConnection(client: Socket) {
@@ -156,7 +158,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         client.handshake.headers.authorization?.replace(/^Bearer\s+/i, "");
       if (!token) throw new Error("missing token");
       const payload = await this.jwt.verifyAsync<{ sub: string; username: string; role: Role }>(token);
-      const user: AuthUser = { id: payload.sub, username: payload.username, role: payload.role };
+      const user: AuthUser = { id: payload.sub, selfId: payload.sub, username: payload.username, role: payload.role };
       if (!hasPermission(user.role, "chat:use")) throw new Error("requires chat:use");
       client.data.user = user;
     } catch {
@@ -186,6 +188,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (!user) return client.emit("error", { error: "unauthorized" } satisfies ChatErrorPayload);
     const content = (body?.content ?? "").trim();
     if (!content) return;
+    // 展示型数据归站点主人：Agent 工具读 admin 的内容；会话/站内信仍按登录人自己
+    const dataId = user.role === "owner" ? user.id : await this.owner.id();
 
     const abort = new AbortController();
     this.running.set(client.id, abort);
@@ -595,7 +599,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
               const toolStart = Date.now();
               const result = phaseToolSet.has(realName)
                 ? await this.registry.execute(
-                    { userId: user.id, username: user.username, role: user.role },
+                    { userId: dataId, username: user.username, role: user.role },
                     realName,
                     args,
                   )

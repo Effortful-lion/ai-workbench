@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { api } from "../../lib/api";
+import { useAuthStore } from "../../stores/auth";
 import { MarkdownText } from "../../lib/markdown";
 
 // ── 类型 ────────────────────────────────────────────────
@@ -235,6 +236,8 @@ type TabId = "overview" | "repos" | "activity" | "inbox";
 // ── 面板 ────────────────────────────────────────────────
 
 export default function GithubPanel() {
+  // 观察窗数据归站点主人；普通用户只读，不能绑定/更换 Token
+  const canManage = useAuthStore((s) => s.user?.role === "owner");
   const [account, setAccount] = useState<GithubAccount | null | undefined>(undefined);
   const [profile, setProfile] = useState<GhProfile | null>(null);
   const [repos, setRepos] = useState<GhRepo[]>([]);
@@ -277,6 +280,14 @@ export default function GithubPanel() {
   }
 
   if (account === null || account.status !== "ok") {
+    if (!canManage) {
+      return (
+        <div className="mx-auto w-[min(900px,94%)] py-8 font-mono text-[12px]">
+          <div className="text-err">✗ GitHub 观察窗尚未配置</div>
+          <div className="mt-1 text-tx3">// Token 由站点主人绑定，普通账号只读查看</div>
+        </div>
+      );
+    }
     return (
       <PatSetup
         account={account ?? undefined}
@@ -337,14 +348,16 @@ export default function GithubPanel() {
         </div>
       </div>
 
-      {/* Tab 条 */}
+      {/* Tab 条：收件箱是站点主人的个人通知，普通用户不可见 */}
       <div className="mb-4 flex gap-1 border-b border-line">
         {([
           ["overview", "概览"],
           ["repos", "仓库"],
           ["activity", "活跃"],
           ["inbox", "收件"],
-        ] as [TabId, string][]).map(([id, label]) => (
+        ] as [TabId, string][])
+          .filter(([id]) => canManage || id !== "inbox")
+          .map(([id, label]) => (
           <button
             key={id}
             onClick={() => {
@@ -360,7 +373,9 @@ export default function GithubPanel() {
         ))}
       </div>
 
-      {tab === "overview" && <OverviewTab profile={profile} onGoInbox={() => setTab("inbox")} />}
+      {tab === "overview" && (
+        <OverviewTab profile={profile} canManage={canManage} onGoInbox={() => setTab("inbox")} />
+      )}
       {tab === "repos" &&
         (selected ? (
           <RepoDetail
@@ -372,7 +387,7 @@ export default function GithubPanel() {
           <ReposGrid repos={repos} q={q} setQ={setQ} onOpen={(r) => setSelected({ owner: r.owner, name: r.name })} />
         ))}
       {tab === "activity" && <ActivityTab />}
-      {tab === "inbox" && <InboxTab />}
+      {tab === "inbox" && canManage && <InboxTab />}
 
       <div className="mt-6 text-[10px] text-tx3">
         // 数据来自 GitHub 快照，热数据 15–30 分钟、日历/语言 24 小时；限流时显示 stale 旧数据。只读观察窗，所有操作 ↗ 回 GitHub。
@@ -383,7 +398,15 @@ export default function GithubPanel() {
 
 // ── Tab 1 · 概览（贡献热力图 + AI 简报 + 数字格） ────────
 
-function OverviewTab({ profile, onGoInbox }: { profile: GhProfile | null; onGoInbox: () => void }) {
+function OverviewTab({
+  profile,
+  canManage,
+  onGoInbox,
+}: {
+  profile: GhProfile | null;
+  canManage: boolean;
+  onGoInbox: () => void;
+}) {
   const [cal, setCal] = useState<CalendarData | null>(null);
   const [digest, setDigest] = useState<DigestData | null>(null);
   const [digestBusy, setDigestBusy] = useState(false);
@@ -404,10 +427,13 @@ function OverviewTab({ profile, onGoInbox }: { profile: GhProfile | null; onGoIn
     api<CalendarData>("/github/activity/calendar")
       .then(setCal)
       .catch((e) => setErr(e instanceof Error ? e.message : "加载失败"));
-    loadDigest();
-    api<InboxData>("/github/inbox").then(setInbox).catch(() => {});
     api<TrendingData>("/github/trending").then(setTrending).catch(() => {});
-  }, []);
+    // 收件箱与 AI 简报属于站点主人的个人数据，普通用户不请求
+    if (canManage) {
+      loadDigest();
+      api<InboxData>("/github/inbox").then(setInbox).catch(() => {});
+    }
+  }, [canManage]);
 
   return (
     <div className="space-y-5">
@@ -449,11 +475,13 @@ function OverviewTab({ profile, onGoInbox }: { profile: GhProfile | null; onGoIn
 
         {/* 右列：数字格 + 热门新项目 */}
         <div className="space-y-4">
-          <div className="grid grid-cols-3 gap-2">
-            <StatCell label="待 review" value={inbox?.reviewRequested.length} onClick={onGoInbox} />
-            <StatCell label="指派给我" value={inbox?.assigned.length} onClick={onGoInbox} />
-            <StatCell label="需关注" value={inbox?.ciFailing.length} warn onClick={onGoInbox} />
-          </div>
+          {canManage && (
+            <div className="grid grid-cols-3 gap-2">
+              <StatCell label="待 review" value={inbox?.reviewRequested.length} onClick={onGoInbox} />
+              <StatCell label="指派给我" value={inbox?.assigned.length} onClick={onGoInbox} />
+              <StatCell label="需关注" value={inbox?.ciFailing.length} warn onClick={onGoInbox} />
+            </div>
+          )}
 
           {/* 热门新项目榜：官方搜索代理，非 github.com/trending */}
           {trending && trending.items.length > 0 && (
@@ -484,8 +512,8 @@ function OverviewTab({ profile, onGoInbox }: { profile: GhProfile | null; onGoIn
         </div>
       </div>
 
-      {/* 全宽 AI 简报：4–5 条事件型，不与热门榜重合 */}
-      <DigestCard digest={digest} busy={digestBusy} onRefresh={() => loadDigest(true)} />
+      {/* 全宽 AI 简报：4–5 条事件型，不与热门榜重合；仅站点主人可见 */}
+      {canManage && <DigestCard digest={digest} busy={digestBusy} onRefresh={() => loadDigest(true)} />}
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   MailAccountDto,
   MailAttachmentDto,
@@ -214,6 +214,40 @@ export default function MailPanel() {
     void loadMessages(folder);
   }, [folder, canAccess, loadMessages]);
 
+  // 打开邮件面板时自动增量同步一次（会话内 3 分钟节流）。
+  // 以前只有手动点「同步」，隔几天不开面板就会漏掉中间的信。
+  const autoSynced = useRef(false);
+  useEffect(() => {
+    if (!canAccess || autoSynced.current) return;
+    autoSynced.current = true;
+    const key = "aiwb:mail:auto-sync";
+    const last = Number(typeof sessionStorage === "undefined" ? 0 : sessionStorage.getItem(key) ?? 0);
+    if (Date.now() - last < 3 * 60 * 1000) return;
+    if (typeof sessionStorage !== "undefined") sessionStorage.setItem(key, String(Date.now()));
+    void (async () => {
+      try {
+        const r = await api<MailSyncResult>("/mail/sync", { method: "POST" });
+        if (r.created > 0) {
+          setNotice(`✓ 已自动同步 ${r.created} 封新邮件`);
+          await Promise.all([loadMessages("inbox"), reloadSummary()]);
+        }
+      } catch {
+        // 自动同步失败保持静默：留给手动「同步」把错误完整报出来
+      }
+    })();
+  }, [canAccess, loadMessages, reloadSummary]);
+
+  // 服务端每 60s 做一次增量同步；面板同节奏刷新列表，新邮件不用手动点「同步」
+  useEffect(() => {
+    if (!canAccess) return;
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      void loadMessages(folder);
+      void reloadSummary();
+    }, 60_000);
+    return () => window.clearInterval(timer);
+  }, [canAccess, folder, loadMessages, reloadSummary]);
+
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
     return messages.filter((m) => {
@@ -332,7 +366,8 @@ export default function MailPanel() {
       const failed = r.failed > 0
         ? ` · 失败 ${r.failed} 个来源（${r.details.filter((d) => d.error).map((d) => `${d.account}: ${d.error}`).join("；")}）`
         : "";
-      setNotice(`✓ 同步完成：新增 ${r.created} 封 · 跳过 ${r.skipped} 封 · ${r.accounts} 个来源${failed}`);
+      const parseNote = r.parseErrors ? ` · ${r.parseErrors} 封解析失败已跳过` : "";
+      setNotice(`✓ 同步完成：新增 ${r.created} 封 · 跳过 ${r.skipped} 封 · ${r.accounts} 个来源${parseNote}${failed}`);
       if (r.failed > 0) setError("部分邮箱同步失败，请检查账户授权码与 IMAP 配置");
       setFolder("inbox");
       await Promise.all([loadMessages(folder === "inbox" ? "inbox" : folder), reloadSummary()]);
@@ -356,6 +391,27 @@ export default function MailPanel() {
         `✓ AI 分类完成：${r.scanned} 封 · 重要 ${r.important} · 订阅 ${r.subscription} · 垃圾 ${r.spam} · 普通 ${r.normal}`,
       );
       await Promise.all([loadMessages(folder), reloadSummary()]);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** 收件箱一键已读：清空未读与顶栏红点 */
+  const markAllRead = async () => {
+    if (busy) return;
+    setBusy(true);
+    setNotice(null);
+    setError(null);
+    try {
+      const r = await api<{ updated: number; skipped: number }>("/mail/messages/read-all", { method: "POST" });
+      await Promise.all([loadMessages(folder), reloadSummary()]);
+      setNotice(
+        r.updated === 0
+          ? "✓ 收件箱没有未读邮件"
+          : `✓ 已标记已读 ${r.updated} 封${r.skipped > 0 ? ` · ${r.skipped} 封回写原邮箱失败已跳过` : ""}`,
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -656,6 +712,18 @@ export default function MailPanel() {
               disabled={busy}
             >
               同步收件箱
+            </button>
+            <button
+              className="rounded border border-line px-2 py-0.5 text-tx2 hover:border-acc hover:text-acc disabled:opacity-40"
+              onClick={() => void markAllRead()}
+              disabled={busy || (digest?.unread ?? 0) === 0}
+              title={
+                (digest?.unread ?? 0) === 0
+                  ? "收件箱没有未读邮件"
+                  : `将收件箱 ${digest?.unread} 封未读全部标记为已读`
+              }
+            >
+              全部已读
             </button>
             <button
               className="rounded border border-line px-2 py-0.5 text-tx2 hover:border-acc hover:text-acc disabled:opacity-40"

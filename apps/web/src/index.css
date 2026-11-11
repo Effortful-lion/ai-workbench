@@ -21,6 +21,8 @@
   --bg: #0B0D10; --bg1: #12151A; --bg2: #181C22; --line: #23282F;
   --acc: #00E59B; --warn: #FFB000; --err: #FF5F56;
   --tx: #E6E9EC; --tx2: #8A919A; --tx3: #4A5158;
+  /* 焦点光晕：强调色 13% 透明，随主题自动换色（原型 .box:focus-within） */
+  --glow: 0 0 12px color-mix(in srgb, var(--acc) 13%, transparent);
 }
 
 /* warm · 纸面琥珀墨（整套成对切换，非仅换强调色） */

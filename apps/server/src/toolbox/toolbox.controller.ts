@@ -29,7 +29,7 @@ export class ToolboxController {
 
   @Get("items")
   @UseGuards(JwtAuthGuard, PermissionGuard)
-  @RequirePerm("tools:read")
+  @RequirePerm("toolbox:read")
   list(@CurrentUser() user: AuthUser) {
     return this.svc.list(user.id);
   }
@@ -37,7 +37,7 @@ export class ToolboxController {
   /** 链接类工具（JSON） */
   @Post("items")
   @UseGuards(JwtAuthGuard, PermissionGuard)
-  @RequirePerm("tools:write")
+  @RequirePerm("toolbox:write")
   create(@CurrentUser() user: AuthUser, @Body() body: ToolboxItemInput) {
     return this.svc.create(user.id, body);
   }
@@ -45,7 +45,7 @@ export class ToolboxController {
   /** 文件类工具（multipart：二进制 / 安装包 / 压缩包 / 技能包） */
   @Post("items/upload")
   @UseGuards(JwtAuthGuard, PermissionGuard)
-  @RequirePerm("tools:write")
+  @RequirePerm("toolbox:write")
   @UseInterceptors(FileInterceptor("file", { limits: { fileSize: MAX_TOOLBOX_FILE_BYTES } }))
   upload(
     @CurrentUser() user: AuthUser,
@@ -58,14 +58,14 @@ export class ToolboxController {
 
   @Delete("items/:id")
   @UseGuards(JwtAuthGuard, PermissionGuard)
-  @RequirePerm("tools:write")
+  @RequirePerm("toolbox:write")
   remove(@Param("id") id: string, @CurrentUser() user: AuthUser) {
     return this.svc.remove(id, user.id).then(() => ({ ok: true }));
   }
 
   @Post("items/:id/use")
   @UseGuards(JwtAuthGuard, PermissionGuard)
-  @RequirePerm("tools:read")
+  @RequirePerm("toolbox:read")
   touch(@Param("id") id: string, @CurrentUser() user: AuthUser) {
     return this.svc.touch(id, user.id);
   }

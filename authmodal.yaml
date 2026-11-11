@@ -1,0 +1,62 @@
+- generic [ref=e2]:
+  - generic [ref=e3]:
+    - banner [ref=e4]:
+      - button "AI-WORKBENCH v0.1" [ref=e5]:
+        - text: AI-WORKBENCH
+        - generic [ref=e6]: v0.1
+      - generic [ref=e7]:
+        - generic [ref=e8]: 只读浏览
+        - button "◐" [ref=e9]
+        - button "登录 / 注册" [ref=e10]
+    - main [ref=e13]:
+      - generic [ref=e15]:
+        - generic [ref=e16]:
+          - generic [ref=e17]: guest@workbench ~ $ wb init
+          - generic [ref=e18]: "[ok] session · 2026-11-10 16:15:52"
+          - generic [ref=e19]: "[ok] workbench · 知识库 · Agent · 工具链 就绪"
+        - generic [ref=e20]:
+          - generic [ref=e21]: 11月10日星期二
+          - heading "下午好，访客！" [level=1] [ref=e22]
+          - generic [ref=e23]: // 只读浏览 · 登录后即可开始对话
+        - generic [ref=e26]:
+          - generic [ref=e27]: ›
+          - textbox "问我任何事，或输入 / 调用工作台能力…" [ref=e47]: 游客试问一句
+          - generic [ref=e29]: ⏎
+          - generic [ref=e30]: ⌘K
+        - generic [ref=e32]:
+          - heading "// 快捷入口" [level=2] [ref=e33]
+          - generic [ref=e34]:
+            - button "博客" [ref=e35]
+            - button "站内信" [ref=e36]
+            - button "个人简历" [ref=e37]
+            - button "百宝箱" [ref=e38]
+            - button "GitHub 观察窗" [ref=e39]
+            - button "CLI 终端" [ref=e40]
+    - contentinfo [ref=e41]:
+      - generic [ref=e42]: "[guest · 只读]"
+      - generic [ref=e44]:
+        - generic [ref=e45]: ◐ dark
+        - generic [ref=e46]: 16:16:05
+  - dialog "登录" [ref=e48]:
+    - generic [ref=e49]:
+      - button "✕" [ref=e50]
+      - generic [ref=e51]: AI-WORKBENCH
+      - generic [ref=e52]:
+        - generic [ref=e53]:
+          - generic [ref=e54]:
+            - generic [ref=e55]: ●
+            - generic [ref=e56]: ●
+            - generic [ref=e57]: ●
+            - generic [ref=e58]: ~/auth/login
+          - generic [ref=e59]: › 登录后即可开始对话
+          - generic [ref=e60]:
+            - generic [ref=e61]:
+              - generic [ref=e62]: "user:"
+              - textbox "user:" [active] [ref=e63]:
+                - /placeholder: 账号名或邮箱
+            - generic [ref=e64]:
+              - generic [ref=e65]: "pass:"
+              - textbox "pass:" [ref=e66]:
+                - /placeholder: ""
+            - button "⏎ login" [disabled] [ref=e67]
+        - button "没有账号？→ register" [ref=e69]

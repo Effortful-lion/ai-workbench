@@ -146,11 +146,11 @@ export class ResumeService {
     };
   }
 
-  /** 本人档案：owner 可编辑，member 只读（与角色权限 me:write 一致） */
+  /** 本人档案：owner 可编辑，member 只读（与角色权限 resume:write 一致） */
   async getOwn(user: { id: string; role: Role }): Promise<ResumeDto> {
     const [row] = await this.db.select().from(users).where(eq(users.id, user.id));
     if (!row) throw new NotFoundException("用户不存在");
-    return this.toDto(row, hasPermission(user.role, "me:write"));
+    return this.toDto(row, hasPermission(user.role, "resume:write"));
   }
 
   /** 游客公开只读：只暴露档案卡本身，不含任何账号字段 */

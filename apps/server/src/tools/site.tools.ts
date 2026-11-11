@@ -27,6 +27,12 @@ const MODULE_META: Record<string, ModuleMeta> = {
     entry: "由 AI 直接调用，无需打开面板",
     summary: "Bing 搜索与网页正文抓取",
   },
+  search: {
+    title: "跨域检索",
+    panel: null,
+    entry: "由 AI 直接调用，无需打开面板",
+    summary: "同时搜索网页、GitHub 与本地知识库并去重",
+  },
   chat: {
     title: "对话",
     panel: null,
@@ -38,6 +44,12 @@ const MODULE_META: Record<string, ModuleMeta> = {
     panel: "kb",
     entry: "/kb（先上传文档，右侧问答页提问）",
     summary: "文档上传与异步摄入、检索问答（quick/deep）、引用来源",
+  },
+  blog: {
+    title: "博客",
+    panel: "blog",
+    entry: "/blog（面板内文章列表；公开阅读页 /b/:username/:slug）",
+    summary: "已发布文章的列表与全文检索、文章编辑与评论审核；访客可在公开页评论",
   },
   mail: {
     title: "邮件管理",
@@ -217,11 +229,13 @@ export function buildCapabilityModules(schemas: ToolSchemaDto[]): CapabilityModu
   for (const id of order) {
     const tools = grouped.get(id);
     if (!tools || tools.length === 0) continue;
+    // 未登记元信息的模块（多半是新加的工具命名空间）至少给出可读的入口说明，
+    // 避免能力地图里出现「—」让模型以为没有入口
     const meta = MODULE_META[id] ?? {
       title: id,
       panel: null,
-      entry: `访达 ${id} 相关接口`,
-      summary: "",
+      entry: "由 AI 直接调用，无需打开面板",
+      summary: `（${id} 模块暂未登记说明）`,
     };
     let read = 0;
     let write = 0;

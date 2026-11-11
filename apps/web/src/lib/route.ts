@@ -75,8 +75,13 @@ function applyRoute(r: RouteState) {
   }
 }
 
-/** 公开页 /p/:user、/t/:user、/c/:user 不参与 hash 路由 */
-const isPublicPath = () => /^\/(p|t|c)\//.test(window.location.pathname);
+/**
+ * 公开页 /p/:user、/t/:user、/c/:user、/b/:user(/:slug) 不参与 hash 路由。
+ * 博客必须在列表里：游客在 /b 页面登录后 enabled 会变 true，
+ * 一旦被 hash 路由接管就会 replaceState 改写 URL 并清掉 {blog:slug} 历史态，
+ * 导致「返回」落到错误页面。
+ */
+const isPublicPath = () => /^\/(p|t|c|b)(\/|$)/.test(window.location.pathname);
 
 /**
  * 双向同步 stores ↔ location.hash。
@@ -107,8 +112,9 @@ export function useHashRoute(enabled: boolean) {
     const write = () => {
       const hash = currentHash();
       if ((window.location.hash || "#/") === hash) return;
+      // 保留已有 history.state：博客公开页等会写入 {blog:slug}，清空会让返回逻辑误判
       history.replaceState(
-        null,
+        history.state,
         "",
         hash === "#/" ? window.location.pathname + window.location.search : hash,
       );

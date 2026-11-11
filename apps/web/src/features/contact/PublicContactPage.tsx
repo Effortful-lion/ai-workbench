@@ -55,7 +55,9 @@ function copyText(text: string, done: () => void) {
 /** 游客公开只读页 /c/:username；所有者登录后可在此页直接编辑 */
 export default function PublicContactPage({ username }: { username: string }) {
   const user = useAuthStore((s) => s.user);
-  const isOwner = user?.username === username;
+  // 「是不是站长本人」与「能不能改」分开：
+  // 普通用户访问 /c/admin 看到的是 admin 的联系信息，但只有 owner 本人能编辑
+  const isOwner = user?.username === username && user?.role === "owner";
 
   const [data, setData] = useState<PublicContactDto | null>(null);
   const [error, setError] = useState<string | null>(null);

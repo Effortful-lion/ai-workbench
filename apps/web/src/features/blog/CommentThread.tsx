@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { BlogCommentDto, BlogCommentPageDto } from "@aiwb/shared";
 import { Icon } from "../../lib/icons";
+import { useAuthModal } from "../../stores/auth-modal";
 import { avatarText, formatDateTime } from "./blogUtils";
 
 interface Props {
@@ -27,6 +28,7 @@ const COLLAPSED_REPLIES = 2;
 export default function CommentThread({
   page, author, readOnly, onSubmit, onLoadMore, loadingMore,
 }: Props) {
+  const requireLogin = useAuthModal((s) => s.requireLogin);
   const [content, setContent] = useState("");
   const [replyTo, setReplyTo] = useState<{ id: string; name: string } | null>(null);
   const [sending, setSending] = useState(false);
@@ -38,6 +40,12 @@ export default function CommentThread({
 
   const submit = async () => {
     if (!onSubmit || !content.trim() || sending) return;
+    // 未登录不发请求：原地弹登录浮层（已输入内容保留）
+    if (!author) {
+      setMsg("✗ 请先登录后再发表评论");
+      requireLogin("登录后即可发表评论");
+      return;
+    }
     setSending(true);
     setMsg(null);
     try {
@@ -86,7 +94,8 @@ export default function CommentThread({
                   onReply={() => setReplyTo({ id: t.root.id, name: t.root.nickname })}
                 />
                 {t.children.length > 0 && (
-                  <div className="mt-4 flex flex-col gap-6 border-l border-line/70 pl-8">
+                  // lg 下头像外移 40px（-left-10），内边距需大于 40px 才不会压到连接线
+                  <div className="mt-4 flex flex-col gap-6 border-l border-line/70 pl-8 lg:pl-12">
                     {kids.map((c) => (
                       <CommentRow
                         key={c.id}
@@ -142,61 +151,66 @@ export default function CommentThread({
 
       {!readOnly && onSubmit && (
         <div className="mt-8 border border-line p-4">
-          {!author ? (
-            <div className="flex flex-wrap items-center gap-4 text-[12px] text-tx3">
-              <Icon name="comment" size={13} />
-              <span>评论公开可见，发表评论需要登录</span>
-              <button
-                className="ml-auto flex items-center gap-1.5 rounded border border-acc/50 px-4 py-1 text-[10.5px] text-acc transition-colors hover:bg-acc/10"
-                onClick={() => window.location.assign("/")}
-              >
-                去登录
-                <Icon name="next" size={11} />
-              </button>
-            </div>
-          ) : (
-            <>
-              <div className="flex flex-wrap items-center gap-2 text-[12px]">
+          <div className="flex flex-wrap items-center gap-2 text-[12px]">
+            {author ? (
+              <>
                 <span className="flex h-[24px] w-[24px] items-center justify-center border border-line bg-acc/5 text-[10px] text-acc">
                   {avatarText(author)}
                 </span>
                 <span className="text-tx3">以</span>
                 <span className="text-acc">@{author}</span>
                 <span className="text-tx3">身份评论</span>
-                {replyTo && (
-                  <span className="flex items-center gap-1.5 rounded border border-acc/40 px-2 py-0.5 text-[10.5px] text-acc">
-                    回复 @{replyTo.name}
-                    <button className="text-tx3 hover:text-err" onClick={() => setReplyTo(null)}>
-                      ✕
-                    </button>
-                  </span>
-                )}
-              </div>
-              <textarea
-                className="mt-2 min-h-[64px] w-full resize-y bg-transparent text-[13px] leading-relaxed outline-none placeholder:text-tx3"
-                placeholder={replyTo ? `回复 @${replyTo.name}…` : "说点什么…"}
-                maxLength={2000}
-                value={content}
-                onChange={(e) => setContent(e.target.value)}
-              />
-              <div className="mt-2 flex flex-wrap items-center gap-4">
-                <span className="text-[9.5px] text-tx3">
-                  // 评论公开可见 · 含敏感词/过多链接会进入人工审核
-                </span>
-                {msg && (
-                  <span className={`text-[10.5px] ${msg.startsWith("✗") ? "text-err" : "text-acc"}`}>{msg}</span>
-                )}
-                <button
-                  className="ml-auto flex items-center gap-1.5 rounded border border-line px-4 py-1 text-[10.5px] text-tx2 transition-colors hover:border-acc hover:text-acc disabled:opacity-50"
-                  disabled={sending || !content.trim()}
-                  onClick={() => void submit()}
-                >
-                  <Icon name="publish" size={12} />
-                  {sending ? "发布中…" : "发布评论"}
+              </>
+            ) : (
+              <span className="flex items-center gap-1.5 text-tx3">
+                <Icon name="comment" size={13} />
+                未登录 · 登录后即可发表评论
+              </span>
+            )}
+            {replyTo && (
+              <span className="flex items-center gap-1.5 rounded border border-acc/40 px-2 py-0.5 text-[10.5px] text-acc">
+                回复 @{replyTo.name}
+                <button className="text-tx3 hover:text-err" onClick={() => setReplyTo(null)}>
+                  ✕
                 </button>
-              </div>
-            </>
-          )}
+              </span>
+            )}
+          </div>
+          <textarea
+            className="mt-2 min-h-[64px] w-full resize-y bg-transparent text-[13px] leading-relaxed outline-none placeholder:text-tx3"
+            placeholder={!author ? "登录后参与讨论…" : replyTo ? `回复 @${replyTo.name}…` : "说点什么…"}
+            maxLength={2000}
+            value={content}
+            onChange={(e) => {
+              setContent(e.target.value);
+              if (msg?.startsWith("✗ 请先登录")) setMsg(null);
+            }}
+          />
+          <div className="mt-2 flex flex-wrap items-center gap-4">
+            <span className="text-[9.5px] text-tx3">
+              // 评论公开可见 · 含敏感词/过多链接会进入人工审核
+            </span>
+            {msg && (
+              <span className={`text-[10.5px] ${msg.startsWith("✗") ? "text-err" : "text-acc"}`}>{msg}</span>
+            )}
+            {!author && msg?.startsWith("✗ 请先登录") && (
+              <button
+                className="flex items-center gap-1 text-[10.5px] text-acc transition-colors hover:underline"
+                onClick={() => requireLogin("登录后即可发表评论")}
+              >
+                去登录
+                <Icon name="next" size={11} />
+              </button>
+            )}
+            <button
+              className="ml-auto flex items-center gap-1.5 rounded border border-line px-4 py-1 text-[10.5px] text-tx2 transition-colors hover:border-acc hover:text-acc disabled:opacity-50"
+              disabled={sending || !content.trim()}
+              onClick={() => void submit()}
+            >
+              <Icon name="publish" size={12} />
+              {!author ? "登录后发表" : sending ? "发布中…" : "发布评论"}
+            </button>
+          </div>
         </div>
       )}
     </section>

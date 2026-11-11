@@ -23,7 +23,8 @@ export default function PublicBlogPage({ username, slug }: { username: string; s
   /** 博主视角：待审评论数（公开页看不到待审评论，需要入口告知） */
   const [pendingCount, setPendingCount] = useState(0);
 
-  const isOwner = !!viewer && viewer.username === username;
+  // 博主视角（含评论审核入口）仅站点主人本人
+  const isOwner = !!viewer && viewer.username === username && viewer.role === "owner";
 
   const panelRef = useRef<HTMLDivElement>(null);
   const jumpFrom = useRef<DOMRect | null>(null);

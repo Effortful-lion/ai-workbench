@@ -132,6 +132,14 @@ export class MailController {
     return this.svc.compose(user.id, body);
   }
 
+  /** 收件箱一键已读：清掉全部未读（批量回写 IMAP \Seen） */
+  @Post("messages/read-all")
+  @UseGuards(JwtAuthGuard, PermissionGuard)
+  @RequirePerm("mail:write")
+  markAllRead(@CurrentUser() user: AuthUser) {
+    return this.svc.markAllRead(user.id);
+  }
+
   @Post("messages/:id/reply")
   @UseGuards(JwtAuthGuard, PermissionGuard)
   @RequirePerm("mail:write")

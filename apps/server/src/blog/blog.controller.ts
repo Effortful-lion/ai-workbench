@@ -18,14 +18,16 @@ export class BlogController {
   @Get("posts")
   @UseGuards(JwtAuthGuard, PermissionGuard)
   @RequirePerm("blog:read")
-  list(@CurrentUser() user: AuthUser) {
-    return this.svc.listPosts(user.id);
+  async list(@CurrentUser() user: AuthUser) {
+    const posts = await this.svc.listPosts(user.id);
+    // 展示型模块：普通用户只能看到站点主人已发布的文章，草稿/下架不暴露
+    return user.role === "owner" ? posts : posts.filter((p) => p.status === "published");
   }
 
   /** KB 文档行状态映射（发布/下架/上架按钮组的数据源，批量一次查询） */
   @Get("kb-links")
   @UseGuards(JwtAuthGuard, PermissionGuard)
-  @RequirePerm("blog:read")
+  @RequirePerm("blog:write")
   async kbLinks(@CurrentUser() user: AuthUser) {
     try {
       return await this.svc.listKbLinks(user.id);
@@ -78,16 +80,30 @@ export class BlogController {
   @RequirePerm("blog:read")
   async listComments(@Param("id") id: string, @CurrentUser() user: AuthUser) {
     try {
-      return await this.svc.listCommentsForOwner(user.id, id);
+      // 普通用户只看已通过评论，待审/拒绝/隐藏属于审核数据
+      return await this.svc.listCommentsForOwner(user.id, id, user.role !== "owner");
     } catch (e) {
       throw new BadRequestException((e as Error).message);
     }
   }
 
-  /** 审核队列：默认全部，可按 pending/approved/rejected/hidden 过滤 */
-  @Get("moderation/comments")
+  /** 面板内阅读页发表评论：按文章 id 定位，身份取 token */
+  @Post("posts/:id/comments")
   @UseGuards(JwtAuthGuard, PermissionGuard)
   @RequirePerm("blog:read")
+  async addComment(
+    @Param("id") id: string,
+    @Body() body: BlogCommentInput,
+    @CurrentUser() user: AuthUser,
+  ) {
+    // 与公开页一致：service 抛出的 400/404 原样传递
+    return this.svc.addCommentByPostId(id, body, user);
+  }
+
+  /** 审核队列：默认全部，可按 pending/approved/rejected/hidden 过滤；仅站点主人可见 */
+  @Get("moderation/comments")
+  @UseGuards(JwtAuthGuard, PermissionGuard)
+  @RequirePerm("blog:write")
   async moderationQueue(
     @CurrentUser() user: AuthUser,
     @Query("status") status?: string,

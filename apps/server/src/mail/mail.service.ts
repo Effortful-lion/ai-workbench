@@ -1,5 +1,5 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, asc, desc, eq, isNotNull } from "drizzle-orm";
+import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { and, asc, desc, eq, inArray, isNotNull } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { resolve, sep } from "node:path";
@@ -32,8 +32,12 @@ const MAX_SUBJECT = 200;
 const MAX_BODY = 20_000;
 const MAX_REASON = 200;
 const MAX_QUERY = 80;
-/** 每个账户单次最多拉取的最新邮件数 */
-const SYNC_LIMIT = 50;
+/** 单次同步最多处理的邮件数（先按时间窗筛 UID，再截断，避免一次拉爆） */
+const SYNC_LIMIT = 300;
+/** 首次同步回看天数 */
+const SYNC_FALLBACK_DAYS = 30;
+/** 增量同步往前重叠的窗口：抵消服务器 INTERNALDATE 与本机时钟/时区的偏差 */
+const SYNC_OVERLAP_MS = 24 * 60 * 60 * 1000;
 const NET_TIMEOUT_MS = 15_000;
 /** HTML 正文入库上限（超出截断，避免 SQLite 行过大） */
 const MAX_HTML = 300_000;
@@ -309,6 +313,10 @@ interface AccountConfig {
 
 @Injectable()
 export class MailService {
+  private readonly log = new Logger("mail");
+  /** 同一账号的同步互斥：定时任务与手动同步并发时，同一封邮件可能被插入两次 */
+  private readonly syncing = new Set<string>();
+
   constructor(@Inject(DB) private readonly db: Db) {}
 
   private toDto(row: typeof mailMessages.$inferSelect, accountName: string): MailMessageDto {
@@ -754,6 +762,57 @@ export class MailService {
     return this.getMessage(userId, id);
   }
 
+  /**
+   * 收件箱一键已读：按账号批量回写 IMAP \Seen 后再改本地。
+   * 回写失败的账号整批跳过——否则下一轮 sync 会把远端未读拉回来覆盖本地。
+   */
+  async markAllRead(userId: string): Promise<{ updated: number; skipped: number }> {
+    const unread = await this.db
+      .select()
+      .from(mailMessages)
+      .where(
+        and(
+          eq(mailMessages.ownerId, userId),
+          eq(mailMessages.folder, "inbox"),
+          eq(mailMessages.isRead, false),
+        ),
+      );
+    if (unread.length === 0) return { updated: 0, skipped: 0 };
+
+    const byAccount = new Map<string, typeof unread>();
+    for (const m of unread) {
+      const list = byAccount.get(m.accountId);
+      if (list) list.push(m);
+      else byAccount.set(m.accountId, [m]);
+    }
+
+    let updated = 0;
+    let skipped = 0;
+    for (const [accountId, list] of byAccount) {
+      const account = await this.ownedAccount(userId, accountId);
+      const uids = list
+        .map((m) => this.remoteUid(m.externalId))
+        .filter((u): u is number => u !== null);
+      try {
+        // 一次会话批量打标，避免逐封建连
+        if (uids.length > 0) {
+          await this.withImap(account, async (client) => {
+            await client.mailboxOpen(await this.remoteFolder(client, "inbox"));
+            await client.messageFlagsAdd(uids, ["\\Seen"], { uid: true });
+          });
+        }
+        await this.db
+          .update(mailMessages)
+          .set({ isRead: true, updatedAt: new Date() })
+          .where(inArray(mailMessages.id, list.map((m) => m.id)));
+        updated += list.length;
+      } catch {
+        skipped += list.length;
+      }
+    }
+    return { updated, skipped };
+  }
+
   async removeMessage(userId: string, id: string) {
     const row = await this.ownedMessage(userId, id);
     const uid = this.remoteUid(row.message.externalId);
@@ -1010,8 +1069,18 @@ export class MailService {
     return counts;
   }
 
-  /** 真实 IMAP 同步：每个已配置账户拉取最新 50 封，按 imap uid 幂等落库 */
+  /** 真实 IMAP 同步：按时间窗增量拉取，按 imap uid 幂等落库 */
   async sync(userId: string): Promise<MailSyncResult> {
+    if (this.syncing.has(userId)) throw new BadRequestException("该账号正在同步中，请稍候");
+    this.syncing.add(userId);
+    try {
+      return await this.runSync(userId);
+    } finally {
+      this.syncing.delete(userId);
+    }
+  }
+
+  private async runSync(userId: string): Promise<MailSyncResult> {
     const accounts = await this.db
       .select()
       .from(mailAccounts)
@@ -1024,6 +1093,8 @@ export class MailService {
 
     let createdTotal = 0;
     let skippedTotal = 0;
+    /** 单封解析/落库失败数（跳过但不中断整批） */
+    let parseErrors = 0;
     let failed = 0;
     const details: MailSyncResult["details"] = [];
 
@@ -1049,7 +1120,13 @@ export class MailService {
         client = this.makeImap(account, cfg, password);
         await client.connect();
         await client.mailboxOpen("INBOX");
-        const exists = this.inboxCount(client);
+        // 按「上次同步时间 - 1 天」取 UID。以前固定取最后 50 条序列号，
+        // 隔几天才点一次同步时，中间那段信会被永久跳过（本次报障就是这个原因）。
+        const since = account.lastSyncedAt
+          ? new Date(Math.max(0, account.lastSyncedAt.getTime() - SYNC_OVERLAP_MS))
+          : new Date(Date.now() - SYNC_FALLBACK_DAYS * 24 * 60 * 60 * 1000);
+        const found = await client.search({ since }, { uid: true });
+        const uids = (Array.isArray(found) ? found : []).slice(-SYNC_LIMIT);
 
         const existing = await this.db
           .select({
@@ -1076,15 +1153,14 @@ export class MailService {
             ]),
         );
 
-        if (exists > 0) {
-          const start = Math.max(1, exists - SYNC_LIMIT + 1);
+        if (uids.length > 0) {
           const now = new Date();
-          for await (const msg of client.fetch(`${start}:*`, {
+          for await (const msg of client.fetch(uids, {
             uid: true,
             envelope: true,
             source: true,
             flags: true,
-          })) {
+          }, { uid: true })) {
             const raw = msg.source as Buffer | undefined;
             if (!raw) {
               skippedTotal += 1;
@@ -1096,20 +1172,25 @@ export class MailService {
             if (known) {
               // 老数据缺 HTML/附件（bodyHtml 为 null）：用本次已拉取的 raw 补全，只做一次
               if (known.bodyHtml === null) {
-                const parsed = await simpleParser(raw);
-                const html = typeof parsed.html === "string" ? parsed.html : "";
-                await this.db
-                  .update(mailMessages)
-                  .set({
-                    bodyHtml: html ? html.slice(0, MAX_HTML) : "",
-                    attachmentsJson: await persistMessageAttachments(
-                      known.id,
-                      parsed.attachments ?? [],
-                    ),
-                    updatedAt: now,
-                  })
-                  .where(eq(mailMessages.id, known.id));
-                known.bodyHtml = html ? "<html>" : "";
+                try {
+                  const parsed = await simpleParser(raw);
+                  const html = typeof parsed.html === "string" ? parsed.html : "";
+                  await this.db
+                    .update(mailMessages)
+                    .set({
+                      bodyHtml: html ? html.slice(0, MAX_HTML) : "",
+                      attachmentsJson: await persistMessageAttachments(
+                        known.id,
+                        parsed.attachments ?? [],
+                      ),
+                      updatedAt: now,
+                    })
+                    .where(eq(mailMessages.id, known.id));
+                  known.bodyHtml = html ? "<html>" : "";
+                } catch (e) {
+                  parseErrors += 1;
+                  this.log.warn(`补全邮件正文失败（uid ${uid}）：${(e as Error).message}`);
+                }
               }
               // 已同步过的邮件：把远端已读状态拉回来，保持双向一致
               const isRead = Boolean(msg.flags?.has("\\Seen"));
@@ -1123,43 +1204,50 @@ export class MailService {
               skippedTotal += 1;
               continue;
             }
-            const parsed = await simpleParser(raw);
-            const from = parsed.from?.value?.[0] ?? msg.envelope?.from?.[0];
-            const fromAddress = from?.address ?? "unknown@unknown";
-            const fromName = from?.name ?? "";
-            const subject = text(parsed.subject ?? msg.envelope?.subject ?? "(无主题)", MAX_SUBJECT) || "(无主题)";
-            const html = typeof parsed.html === "string" ? parsed.html : "";
-            const body = bodyText(parsed.text ?? (html ? stripHtml(html) : "")) || "（无正文）";
-            const receivedAt = new Date(parsed.date ?? msg.envelope?.date ?? now);
-            const isRead = Boolean(msg.flags?.has("\\Seen"));
-            const { category, reason } = classifyContent(subject, body, fromName, fromAddress);
+            // 单封解析/落库失败只跳过这一封：以前一个异常会让整批新邮件停在半路
+            try {
+              const parsed = await simpleParser(raw);
+              const from = parsed.from?.value?.[0] ?? msg.envelope?.from?.[0];
+              const fromAddress = from?.address ?? "unknown@unknown";
+              const fromName = from?.name ?? "";
+              const subject = text(parsed.subject ?? msg.envelope?.subject ?? "(无主题)", MAX_SUBJECT) || "(无主题)";
+              const html = typeof parsed.html === "string" ? parsed.html : "";
+              const body = bodyText(parsed.text ?? (html ? stripHtml(html) : "")) || "（无正文）";
+              const receivedAt = new Date(parsed.date ?? msg.envelope?.date ?? now);
+              const isRead = Boolean(msg.flags?.has("\\Seen"));
+              const { category, reason } = classifyContent(subject, body, fromName, fromAddress);
 
-            const messageId = randomUUID();
-            await this.db.insert(mailMessages).values({
-              id: messageId,
-              ownerId: userId,
-              accountId: account.id,
-              folder: "inbox",
-              direction: "inbound",
-              fromName,
-              fromAddress,
-              toAddress: account.address,
-              subject,
-              body,
-              bodyHtml: html ? html.slice(0, MAX_HTML) : "",
-              attachmentsJson: await persistMessageAttachments(messageId, parsed.attachments ?? []),
-              externalId,
-              receivedAt,
-              isRead,
-              isStarred: Boolean(msg.flags?.has("\\Flagged")),
-              category,
-              aiReason: reason,
-              classifiedAt: now,
-              createdAt: now,
-              updatedAt: now,
-            });
-            created += 1;
-            createdTotal += 1;
+              const messageId = randomUUID();
+              await this.db.insert(mailMessages).values({
+                id: messageId,
+                ownerId: userId,
+                accountId: account.id,
+                folder: "inbox",
+                direction: "inbound",
+                fromName,
+                fromAddress,
+                toAddress: account.address,
+                subject,
+                body,
+                bodyHtml: html ? html.slice(0, MAX_HTML) : "",
+                attachmentsJson: await persistMessageAttachments(messageId, parsed.attachments ?? []),
+                externalId,
+                receivedAt,
+                isRead,
+                isStarred: Boolean(msg.flags?.has("\\Flagged")),
+                category,
+                aiReason: reason,
+                classifiedAt: now,
+                createdAt: now,
+                updatedAt: now,
+              });
+              created += 1;
+              createdTotal += 1;
+            } catch (e) {
+              parseErrors += 1;
+              skippedTotal += 1;
+              this.log.warn(`跳过一封无法处理的邮件（uid ${uid}）：${(e as Error).message}`);
+            }
           }
         }
 
@@ -1188,6 +1276,7 @@ export class MailService {
       accounts: accounts.length,
       classified: createdTotal,
       failed,
+      parseErrors,
       details,
     };
   }

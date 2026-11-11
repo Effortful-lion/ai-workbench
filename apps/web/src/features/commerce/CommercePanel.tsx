@@ -108,7 +108,7 @@ function findAd(list: CommerceAdDto[], key: string): CommerceAdDto | undefined {
 /** 商业化：订阅方案 · 支付流水 · 广告位 —— 终端营收看板 */
 export default function CommercePanel() {
   const role = useAuthStore((s) => s.user?.role ?? "guest");
-  // 原型 ACL：~/biz owner rw / member × / guest ×
+  // 商业化数据与读写权限都归 admin，普通用户不可见
   const canAccess = role === "owner";
   const canWrite = canAccess;
 

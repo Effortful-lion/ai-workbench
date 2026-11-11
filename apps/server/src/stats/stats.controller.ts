@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Post, Query, Req, UseGuards } from "@nestjs/common";
-import { JwtAuthGuard, CurrentUser, type AuthUser } from "../auth/jwt-auth.guard";
+import { JwtAuthGuard } from "../auth/jwt-auth.guard";
+import { PermissionGuard, RequirePerm } from "../common/permission.guard";
 import { StatsService } from "./stats.service";
 
 interface CollectRow {
@@ -38,7 +39,9 @@ export class StatsController {
     return this.stats.bulkInsert(toInsert).then((n) => ({ ok: true, inserted: n }));
   }
 
-  @UseGuards(JwtAuthGuard)
+  /** 站点访问数据属于 admin 的管理视图，member 无读权限 */
+  @UseGuards(JwtAuthGuard, PermissionGuard)
+  @RequirePerm("stats:read")
   @Get("overview")
   overview(
     @Query("days") days: number = 7,

@@ -10,8 +10,9 @@ import { PermissionGuard, RequirePerm } from "../common/permission.guard";
 export class ModelsController {
   constructor(private readonly svc: ModelsService) {}
 
+  /** 列表同时服务于「模型管理」与「切模型」：写操作仍是 models:write */
   @Get()
-  @RequirePerm("models:read")
+  @RequirePerm("models:use")
   list() {
     return this.svc.list();
   }
@@ -41,7 +42,7 @@ export class ModelsController {
   }
 
   @Post(":id/test")
-  @RequirePerm("models:read")
+  @RequirePerm("models:write")
   test(@Param("id") id: string, @Body() body: { prompt?: string }) {
     return this.svc.test(id, body?.prompt);
   }

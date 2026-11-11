@@ -5,6 +5,10 @@ import type { HttpToolSpec } from "@aiwb/shared";
 export const users = sqliteTable("users", {
   id: text("id").primaryKey(),
   username: text("username").notNull().unique(),
+  /** 登录用邮箱：仅邮箱注册的用户有值，配置种入的 admin 为空 */
+  email: text("email").unique(),
+  /** 展示昵称：注册时自动生成，用户可改；空则回退 username */
+  nickname: text("nickname"),
   passwordHash: text("password_hash").notNull(),
   role: text("role", { enum: ["owner", "member", "guest"] }).notNull().default("guest"),
   profileJson: text("profile_json", { mode: "json" }).$type<Record<string, unknown>>(),
@@ -18,6 +22,21 @@ export const sessions = sqliteTable("sessions", {
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   refreshToken: text("refresh_token").notNull().unique(),
   expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
+});
+
+/** 邮箱验证码：注册/找回密码一次性凭证，同邮箱只保留最新一条有效码 */
+export const emailCodes = sqliteTable("email_codes", {
+  id: text("id").primaryKey(),
+  email: text("email").notNull(),
+  code: text("code").notNull(),
+  purpose: text("purpose", { enum: ["register", "reset"] }).notNull().default("register"),
+  expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
+  consumedAt: integer("consumed_at", { mode: "timestamp" }),
+  /** 校验失败次数，超过 5 次必须重新获取 */
+  attempts: integer("attempts").notNull().default(0),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
 });
 
 export const conversations = sqliteTable("conversations", {

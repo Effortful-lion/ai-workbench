@@ -32,6 +32,22 @@ const REVIEW_KEYWORDS = ["加微信", "代开发票", "博彩", "赌场", "贷�
 /** 链接数超过该值进入人工待审 */
 const REVIEW_LINK_LIMIT = 2;
 
+/**
+ * 评论入库前清洗：统一换行，去掉控制字符 / 零宽字符 / 双向覆盖符。
+ * 只做纯文本规整，不拼 HTML —— 输出侧由 React 文本节点天然转义（无 dangerouslySetInnerHTML）。
+ */
+function sanitizeComment(raw: string): string {
+  return raw
+    .replace(/\r\n?/g, "\n")
+    // 除 \n \t 外的 C0 控制字符 + DEL
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "")
+    // 零宽与双向文本控制符：会被用来伪造楼层号 / 回复对象
+    .replace(/[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, "")
+    // 超过两个空行的折叠为一行空行，避免用空白撑开版面
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 /** 自动分流：博主本人不审；敏感词 / 链接过多 / 连续大写刷屏进人工 */
 function needsReview(content: string): boolean {
   const links = (content.match(/https?:\/\//gi) ?? []).length;
@@ -176,9 +192,13 @@ export class BlogService {
   }
 
   /** 评论管理：列出某文章全部评论（含 hidden） */
-  async listCommentsForOwner(userId: string, postId: string): Promise<BlogCommentDto[]> {
+  async listCommentsForOwner(
+    userId: string,
+    postId: string,
+    approvedOnly = false,
+  ): Promise<BlogCommentDto[]> {
     await this.mustOwn(userId, postId);
-    return this.listComments(postId, false);
+    return this.listComments(postId, approvedOnly);
   }
 
   async removeComment(userId: string, commentId: string): Promise<void> {
@@ -291,7 +311,7 @@ export class BlogService {
     };
   }
 
-  /** 发表评论：登录身份；规则自动分流 approved / pending（不阻塞，写后立即可见状态） */
+  /** 发表评论（公开页）：按 username + slug 定位文章；规则自动分流 approved / pending */
   async addPublicComment(
     username: string,
     slug: string,
@@ -304,8 +324,41 @@ export class BlogService {
       .from(blogPosts)
       .where(and(eq(blogPosts.ownerId, owner.id), eq(blogPosts.slug, slug)));
     if (!post || post.status !== "published") throw new NotFoundException("post not found");
+    return this.createComment(post, owner.id, input, author);
+  }
 
-    const content = (input?.content ?? "").trim().slice(0, MAX_COMMENT);
+  /** 发表评论（面板内阅读页）：按文章 id 定位，登录态即可评论，规则与公开页一致 */
+  async addCommentByPostId(
+    postId: string,
+    input: BlogCommentInput,
+    author: { id: string; username: string },
+  ): Promise<BlogCommentDto> {
+    const [post] = await this.db.select().from(blogPosts).where(eq(blogPosts.id, postId));
+    if (!post) throw new NotFoundException("post not found");
+    // 站点主人可对草稿评论；其他人只能评论已发布文章
+    const isOwner = post.ownerId === author.id;
+    if (!isOwner && post.status !== "published") throw new NotFoundException("post not found");
+    return this.createComment(post, post.ownerId, input, author);
+  }
+
+  /** 评论入库唯一路径：清洗 → 校验 → 频控 → 树形压平 → 自动分流 → 通知 */
+  private async createComment(
+    post: typeof blogPosts.$inferSelect,
+    ownerId: string,
+    input: BlogCommentInput,
+    author: { id: string; username: string },
+  ): Promise<BlogCommentDto> {
+    // token 里只有账号名；昵称随改随变，评论展示走库里最新值
+    const [self] = await this.db
+      .select({ nickname: users.nickname })
+      .from(users)
+      .where(eq(users.id, author.id));
+    const displayName = self?.nickname ?? author.username;
+
+    // 客户端字段不可信：非字符串直接按空处理，避免脏类型触发 500
+    const rawContent = typeof input?.content === "string" ? input.content : "";
+    if (rawContent.length > MAX_COMMENT) throw new BadRequestException("评论过长（上限 2000 字）");
+    const content = sanitizeComment(rawContent);
     if (!content) throw new BadRequestException("评论内容不能为空");
 
     // 频率与重复：同一用户在同一篇文章下 10s 一条、60s 内不许重复内容
@@ -330,11 +383,12 @@ export class BlogService {
     let replyToUserId: string | null = null;
     let replyToUsername: string | null = null;
     let parentNickname = "";
-    if (input?.parentId) {
+    const replyTarget = typeof input?.parentId === "string" ? input.parentId.trim() : "";
+    if (replyTarget) {
       const [parent] = await this.db
         .select()
         .from(blogComments)
-        .where(and(eq(blogComments.id, input.parentId), eq(blogComments.postId, post.id)));
+        .where(and(eq(blogComments.id, replyTarget), eq(blogComments.postId, post.id)));
       if (!parent || parent.status !== "approved") throw new BadRequestException("回复的评论不存在");
       rootId = parent.depth === 0 ? parent.id : parent.rootId;
       parentId = rootId;
@@ -345,7 +399,7 @@ export class BlogService {
     }
 
     // 自动分流：博主本人直接通过；命中敏感词/链接过多的进入待审
-    const isOwner = owner.id === author.id;
+    const isOwner = ownerId === author.id;
     const pending = !isOwner && needsReview(content);
 
     const id = randomUUID();
@@ -355,7 +409,7 @@ export class BlogService {
         id,
         postId: post.id,
         userId: author.id,
-        nickname: author.username,
+        nickname: displayName,
         content,
         rootId: depth === 0 ? id : rootId,
         parentId,
@@ -368,7 +422,7 @@ export class BlogService {
 
     if (pending) {
       await this.notify
-        .create(owner.id, {
+        .create(ownerId, {
           type: "blog",
           title: `待审核评论：《${post.title}》`,
           body: `${author.username}：${content.slice(0, 80)}`,
@@ -379,12 +433,12 @@ export class BlogService {
         .create(replyToUserId, {
           type: "blog",
           title: `有人在《${post.title}》回复了你`,
-          body: `${author.username} 回复 ${parentNickname}：${content.slice(0, 80)}`,
+          body: `${displayName} 回复 ${parentNickname}：${content.slice(0, 80)}`,
         })
         .catch(() => {});
-    } else if (owner.id !== author.id) {
+    } else if (ownerId !== author.id) {
       await this.notify
-        .create(owner.id, {
+        .create(ownerId, {
           type: "blog",
           title: `博客新评论：《${post.title}》`,
           body: `${author.username}：${content.slice(0, 80)}`,

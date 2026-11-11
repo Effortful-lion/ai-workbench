@@ -186,8 +186,9 @@ function PipelineTrack({ steps }: { steps: PipeRunDto["steps"] }) {
 /** 流水线工厂：SOP 编排 + 顺序执行 + 运行记录 —— 终端式 SOP 工厂 */
 export default function PipePanel() {
   const role = useAuthStore((s) => s.user?.role ?? "guest");
-  // 原型 ACL：~/pipe owner rw / member × / guest ×
+  // 流水线数据与读写权限都归 admin，普通用户不可见
   const canAccess = role === "owner";
+  const canWrite = canAccess;
 
   const [digest, setDigest] = useState<PipeDigestDto | null>(null);
   const [sops, setSops] = useState<PipeSopDto[]>([]);
@@ -606,9 +607,8 @@ export default function PipePanel() {
   if (!canAccess) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 font-mono text-[12px] text-tx3">
-        <div className="text-err">403 · ~/pipe 仅 owner 可访问</div>
-        <div>// 原型 ACL：owner rw · member × · guest ×</div>
-        <div>// 流水线会批量调用模型并消耗额度，不对协作者与游客开放</div>
+        <div className="text-err">403 · ~/pipe 需要登录</div>
+        <div>// 登录后可只读查看流水线；新建与运行仍限站点主人</div>
       </div>
     );
   }
@@ -672,7 +672,8 @@ export default function PipePanel() {
           <button
             className="rounded border border-line px-2 py-0.5 text-tx2 hover:border-acc hover:text-acc disabled:opacity-40"
             onClick={() => setCmd("pipe.new ")}
-            disabled={busy}
+            disabled={busy || !canWrite}
+            title={canWrite ? "新建 SOP" : "仅站点主人可新建"}
           >
             新建 SOP
           </button>

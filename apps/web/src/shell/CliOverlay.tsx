@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { useAuthStore } from "../stores/auth";
+import { displayName, useAuthStore } from "../stores/auth";
+import { canOpenPanel } from "../lib/panel-access";
 import { PANEL_META, usePanelStore, type PanelId } from "../stores/panel";
 import { useUiStore, type Theme } from "../stores/ui";
 
@@ -50,16 +51,24 @@ export default function CliOverlay() {
         ]);
         break;
       case "whoami":
-        print([{ text: `${user?.username} [${user?.role}]`, cls: "acc" }]);
+        print([
+          { text: `${displayName(user)} (${user?.username}) [${user?.role}]`, cls: "acc" },
+          { text: user?.email ? `mail: ${user.email}` : "mail: —（配置账号无邮箱）", cls: "dim" },
+        ]);
         break;
       case "open": {
         const id = args[0] as PanelId | undefined;
+        const allowed = Object.keys(PANEL_META).filter((p) => canOpenPanel(p as PanelId, user?.role));
         if (id && id in PANEL_META) {
+          if (!canOpenPanel(id, user?.role)) {
+            print([{ text: `open: ${PANEL_META[id].title} 仅站点主人可用`, cls: "err" }]);
+            break;
+          }
           print([{ text: `▸ 打开面板 ${PANEL_META[id].path}`, cls: "acc" }]);
           openPanel(id);
           setCli(false);
         } else {
-          print([{ text: `open: 未知模块「${args[0] ?? ""}」· 可选: ${Object.keys(PANEL_META).join("|")}`, cls: "err" }]);
+          print([{ text: `open: 未知模块「${args[0] ?? ""}」· 可选: ${allowed.join("|")}`, cls: "err" }]);
         }
         break;
       }

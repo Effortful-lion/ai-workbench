@@ -15,13 +15,13 @@ export class GithubController {
   }
 
   @Post("account/token")
-  @RequirePerm("github:read")
+  @RequirePerm("github:write")
   setToken(@CurrentUser() user: AuthUser, @Body() body: { token: string }) {
     return this.github.setToken(user.id, body.token);
   }
 
   @Delete("account")
-  @RequirePerm("github:read")
+  @RequirePerm("github:write")
   remove(@CurrentUser() user: AuthUser) {
     return this.github.removeAccount(user.id);
   }
@@ -37,7 +37,11 @@ export class GithubController {
   @RequirePerm("github:read")
   async repos(@CurrentUser() user: AuthUser, @Query("q") q?: string, @Query("refresh") refresh?: string) {
     const snap = await this.github.repos(user.id, q, refresh === "1");
-    return { items: snap.data, fetchedAt: snap.fetchedAt, stale: snap.stale };
+    // 展示型模块：普通用户只看公开仓库，私有仓库不进列表
+    const items = user.role === "owner"
+      ? snap.data
+      : (snap.data as { private?: boolean }[]).filter((r) => !r.private);
+    return { items, fetchedAt: snap.fetchedAt, stale: snap.stale };
   }
 
   @Get("activity/calendar")
@@ -54,15 +58,17 @@ export class GithubController {
     return { ...(snap.data as object), fetchedAt: snap.fetchedAt, stale: snap.stale };
   }
 
+  /** 收件箱是站点主人的个人通知，普通用户不可见 */
   @Get("inbox")
-  @RequirePerm("github:read")
+  @RequirePerm("github:write")
   async inbox(@CurrentUser() user: AuthUser, @Query("refresh") refresh?: string) {
     const snap = await this.github.inbox(user.id, refresh === "1");
     return { ...(snap.data as object), fetchedAt: snap.fetchedAt, stale: snap.stale };
   }
 
+  /** AI 简报基于收件箱事件，同样只对站点主人开放 */
   @Get("inbox/digest")
-  @RequirePerm("github:read")
+  @RequirePerm("github:write")
   async digest(@CurrentUser() user: AuthUser, @Query("refresh") refresh?: string) {
     const snap = await this.github.digest(user.id, refresh === "1");
     return { ...(snap.data as object), fetchedAt: snap.fetchedAt, stale: snap.stale };
@@ -83,12 +89,15 @@ export class GithubController {
     @Query("sort") sort?: string,
     @Query("refresh") refresh?: string,
   ) {
-    const snap = await this.github.searchRepos(user.id, q ?? "", sort, refresh === "1");
+    // 普通用户的搜索结果只能落在公开仓库
+    const query = user.role === "owner" ? q ?? "" : `${q ?? ""} is:public`.trim();
+    const snap = await this.github.searchRepos(user.id, query, sort, refresh === "1");
     return { ...(snap.data as object), fetchedAt: snap.fetchedAt, stale: snap.stale };
   }
 
+  /** 代码搜索可命中私有仓库代码，仅站点主人可用 */
   @Get("search/code")
-  @RequirePerm("github:read")
+  @RequirePerm("github:write")
   async searchCode(@CurrentUser() user: AuthUser, @Query("q") q?: string) {
     const snap = await this.github.searchCode(user.id, q ?? "");
     return { ...(snap.data as object), fetchedAt: snap.fetchedAt, stale: snap.stale };
@@ -98,6 +107,7 @@ export class GithubController {
   @RequirePerm("github:read")
   async ask(@CurrentUser() user: AuthUser, @Body() body: { owner?: string; name?: string; question?: string }) {
     if (!body?.owner || !body?.name) throw new NotFoundException("owner 和 name 必填");
+    await this.assertPublicRepo(user, body.owner, body.name);
     return this.github.ask(user.id, body.owner, body.name, body.question ?? "");
   }
 
@@ -105,6 +115,7 @@ export class GithubController {
   @RequirePerm("github:read")
   async reviewDraft(@CurrentUser() user: AuthUser, @Body() body: { owner?: string; name?: string; pr?: number }) {
     if (!body?.owner || !body?.name) throw new NotFoundException("owner 和 name 必填");
+    await this.assertPublicRepo(user, body.owner, body.name);
     return this.github.reviewDraft(user.id, body.owner, body.name, Number(body.pr));
   }
 
@@ -116,6 +127,7 @@ export class GithubController {
     @Param("name") name: string,
     @Query("refresh") refresh?: string,
   ) {
+    await this.assertPublicRepo(user, owner, name, refresh === "1");
     return this.github.repoDetail(user.id, owner, name, refresh === "1");
   }
 
@@ -127,6 +139,7 @@ export class GithubController {
     @Param("name") name: string,
     @Query("refresh") refresh?: string,
   ) {
+    await this.assertPublicRepo(user, owner, name);
     const snap = await this.github.commits(user.id, owner, name, refresh === "1");
     return { items: snap.data, fetchedAt: snap.fetchedAt, stale: snap.stale };
   }
@@ -139,6 +152,7 @@ export class GithubController {
     @Param("name") name: string,
     @Query("refresh") refresh?: string,
   ) {
+    await this.assertPublicRepo(user, owner, name);
     const snap = await this.github.commitActivity(user.id, owner, name, refresh === "1");
     return { ...(snap.data as object), fetchedAt: snap.fetchedAt, stale: snap.stale };
   }
@@ -151,6 +165,7 @@ export class GithubController {
     @Param("name") name: string,
     @Query("refresh") refresh?: string,
   ) {
+    await this.assertPublicRepo(user, owner, name);
     const snap = await this.github.tree(user.id, owner, name, refresh === "1");
     return { ...snap.data, fetchedAt: snap.fetchedAt, stale: snap.stale };
   }
@@ -163,7 +178,17 @@ export class GithubController {
     @Param("name") name: string,
     @Query("path") path: string,
   ) {
+    await this.assertPublicRepo(user, owner, name);
     const snap = await this.github.file(user.id, owner, name, path);
     return snap.data;
+  }
+
+  /** 站点主人可看全部仓库；普通用户访问私有仓库一律按不存在处理 */
+  private async assertPublicRepo(user: AuthUser, owner: string, name: string, force = false) {
+    if (user.role === "owner") return;
+    const snap = await this.github.repo(user.id, owner, name, force);
+    if ((snap.data as { private?: boolean }).private) {
+      throw new NotFoundException("仓库不存在");
+    }
   }
 }

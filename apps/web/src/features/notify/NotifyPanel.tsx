@@ -26,6 +26,11 @@ const TYPE_FILTERS: { id: NotificationType | "all"; label: string }[] = [
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
+/** 广播未读数：顶栏红点即时同步，不等 60s 轮询 */
+function publishUnread(unread: number) {
+  window.dispatchEvent(new CustomEvent("aiwb:notify-changed", { detail: { unread } }));
+}
+
 function fmtWhen(ts: number): string {
   const d = new Date(ts);
   const now = new Date();
@@ -93,6 +98,7 @@ export default function NotifyPanel() {
       setDigest(dig);
       setItems(list);
       setError(null);
+      publishUnread(dig.unread);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -117,6 +123,11 @@ export default function NotifyPanel() {
   const openItem = async (n: NotificationDto) => {
     setSelectedId(n.id);
     if (n.isRead || !canWrite) return;
+    // 乐观更新：点开瞬间消掉红点与小圆点；失败回滚，成功后 reload 校准
+    const optimistic = Math.max(0, (digest?.unread ?? 0) - 1);
+    setItems((prev) => prev.map((x) => (x.id === n.id ? { ...x, isRead: true } : x)));
+    setDigest((d) => (d ? { ...d, unread: optimistic } : d));
+    publishUnread(optimistic);
     try {
       const next = await api<NotificationDto>(`/notify/notifications/${n.id}`, {
         method: "PATCH",
@@ -125,6 +136,9 @@ export default function NotifyPanel() {
       setItems((prev) => prev.map((x) => (x.id === next.id ? next : x)));
       void reload();
     } catch (e) {
+      setItems((prev) => prev.map((x) => (x.id === n.id ? { ...x, isRead: false } : x)));
+      setDigest((d) => (d ? { ...d, unread: optimistic + 1 } : d));
+      publishUnread(optimistic + 1);
       setError(e instanceof Error ? e.message : String(e));
     }
   };
@@ -136,6 +150,10 @@ export default function NotifyPanel() {
         body: JSON.stringify({ isRead: !n.isRead }),
       });
       setItems((prev) => prev.map((x) => (x.id === next.id ? next : x)));
+      // 顶栏红点先行同步，reload 只做数据校准
+      const after = Math.max(0, (digest?.unread ?? 0) + (next.isRead ? -1 : 1));
+      setDigest((d) => (d ? { ...d, unread: after } : d));
+      publishUnread(after);
       setNotice(`✓ ${next.isRead ? "已标为已读" : "已标为未读"}`);
       void reload();
     } catch (e) {
@@ -148,6 +166,12 @@ export default function NotifyPanel() {
       await api(`/notify/notifications/${n.id}`, { method: "DELETE" });
       setItems((prev) => prev.filter((x) => x.id !== n.id));
       if (selectedId === n.id) setSelectedId(null);
+      // 删掉的是未读项时红点立即减一
+      if (!n.isRead) {
+        const after = Math.max(0, (digest?.unread ?? 0) - 1);
+        setDigest((d) => (d ? { ...d, unread: after } : d));
+        publishUnread(after);
+      }
       setNotice("✓ 已删除该站内信");
       void reload();
     } catch (e) {
@@ -180,6 +204,9 @@ export default function NotifyPanel() {
     setError(null);
     try {
       const r = await api<{ updated: number }>("/notify/read-all", { method: "POST" });
+      // 服务端已全部置读：红点立即归零
+      setDigest((d) => (d ? { ...d, unread: 0 } : d));
+      publishUnread(0);
       setNotice(`✓ 已把 ${r.updated} 条标为已读`);
       await reload();
     } catch (e) {
@@ -241,19 +268,22 @@ export default function NotifyPanel() {
           >
             全部已读
           </button>
-          <button
-            className="rounded border border-line px-2 py-0.5 text-tx2 hover:border-acc hover:text-acc disabled:opacity-40"
-            onClick={() => void runScan()}
-            disabled={busy}
-          >
-            {busy ? "⠋ 扫描中" : "扫描提醒"}
-          </button>
+          {/* 扫描会读取日程/邮件生成提醒，属于 admin 工作流 */}
+          {role === "owner" && (
+            <button
+              className="rounded border border-line px-2 py-0.5 text-tx2 hover:border-acc hover:text-acc disabled:opacity-40"
+              onClick={() => void runScan()}
+              disabled={busy}
+            >
+              {busy ? "⠋ 扫描中" : "扫描提醒"}
+            </button>
+          )}
         </div>
       </div>
 
       {/* 过滤 */}
       <div className="mb-2 flex flex-wrap items-center gap-2 border-b border-line pb-2 text-[11px]">
-        {TYPE_FILTERS.map((f) => (
+        {(role === "owner" ? TYPE_FILTERS : TYPE_FILTERS.filter((f) => f.id === "all" || f.id === "blog")).map((f) => (
           <button
             key={f.id}
             className={`rounded border px-1.5 py-0.5 ${

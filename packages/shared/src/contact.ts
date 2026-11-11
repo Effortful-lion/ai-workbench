@@ -28,5 +28,6 @@ export interface PublicContactDto {
 }
 
 export interface OwnContactDto extends PublicContactDto {
-  canEdit: true;
+  /** 是否可编辑：个人站里只有 owner（站点主人）为 true */
+  canEdit: boolean;
 }

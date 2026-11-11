@@ -106,7 +106,7 @@ function findCustomer(list: CrmCustomerDto[], key: string): CrmCustomerDto | und
 /** 客户管理：客户档案 + 跟进时间线 —— 终端式 CRM */
 export default function CrmPanel() {
   const role = useAuthStore((s) => s.user?.role ?? "guest");
-  // 原型 ACL：~/crm owner rw / member × / guest ×
+  // 客户数据与读写权限都归 admin，普通用户不可见
   const canAccess = role === "owner";
   const canWrite = canAccess;
 

@@ -12,7 +12,7 @@ export class NotifyController {
   @UseGuards(JwtAuthGuard, PermissionGuard)
   @RequirePerm("notify:read")
   digest(@CurrentUser() user: AuthUser) {
-    return this.svc.digest(user.id);
+    return this.svc.digest(user.id, user.role !== "owner");
   }
 
   @Get("notifications")
@@ -23,22 +23,27 @@ export class NotifyController {
     @Query("type") type?: string,
     @Query("unread") unread?: string,
   ) {
-    return this.svc.list(user.id, {
-      type: type ? (type as NotificationType) : undefined,
-      unreadOnly: unread === "1" || unread === "true",
-    });
+    return this.svc.list(
+      user.id,
+      {
+        type: type ? (type as NotificationType) : undefined,
+        unreadOnly: unread === "1" || unread === "true",
+      },
+      user.role !== "owner",
+    );
   }
 
   @Post("notifications")
   @UseGuards(JwtAuthGuard, PermissionGuard)
   @RequirePerm("notify:write")
   create(@CurrentUser() user: AuthUser, @Body() body: NotificationInput) {
-    return this.svc.create(user.id, body);
+    return this.svc.create(user.id, body, user.role === "owner");
   }
 
+  /** 扫描日程/邮件生成提醒：读的是 admin 的工作流，仅 owner 可触发 */
   @Post("scan")
   @UseGuards(JwtAuthGuard, PermissionGuard)
-  @RequirePerm("notify:write")
+  @RequirePerm("notify:scan")
   scan(@CurrentUser() user: AuthUser) {
     return this.svc.scan(user.id);
   }

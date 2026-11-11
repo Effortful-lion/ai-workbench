@@ -1,4 +1,5 @@
 export * from "./roles.js";
+export * from "./auth.js";
 export * from "./tool.js";
 export * from "./models.js";
 export * from "./chat.js";

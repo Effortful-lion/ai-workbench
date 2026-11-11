@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { HealthController } from "./health/health.controller";
 import { DbModule } from "./db/db.module";
+import { CommonModule } from "./common/common.module";
 import { AuthModule } from "./auth/auth.module";
 import { ModelsModule } from "./models/models.module";
 import { ChatModule } from "./chat/chat.module";
@@ -25,7 +26,7 @@ import { GithubModule } from "./github/github.module";
 
 @Module({
   imports: [
-    DbModule, AuthModule, ToolsModule, ModelsModule, AgentsModule, ChatModule, KbModule, BlogModule, ResumeModule, ContactModule,
+    DbModule, CommonModule, AuthModule, ToolsModule, ModelsModule, AgentsModule, ChatModule, KbModule, BlogModule, ResumeModule, ContactModule,
     ToolboxModule, ProjectsModule, CodeModule, ScheduleModule, MailModule, NotifyModule, CommerceModule,
     CrmModule,
     PipeModule,

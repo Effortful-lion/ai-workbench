@@ -65,9 +65,15 @@ export class NotifyService {
     };
   }
 
+  /**
+   * 收件箱列表。
+   * @param discussionOnly 非 admin 只能看到「讨论类」（博客评论/回复）消息，
+   *        日程、邮件、系统这类管理信息属于 admin 的工作流
+   */
   async list(
     userId: string,
     filter: { type?: NotificationType; unreadOnly?: boolean } = {},
+    discussionOnly = false,
   ): Promise<NotificationDto[]> {
     const rows = await this.db
       .select()
@@ -76,16 +82,18 @@ export class NotifyService {
       .orderBy(desc(notifications.createdAt));
 
     let list = rows.map((r) => this.toDto(r));
+    if (discussionOnly) list = list.filter((n) => n.type === "blog");
     if (filter.type) list = list.filter((n) => n.type === filter.type);
     if (filter.unreadOnly) list = list.filter((n) => !n.isRead);
     return list;
   }
 
-  async digest(userId: string): Promise<NotificationDigestDto> {
-    const rows = await this.db
+  async digest(userId: string, discussionOnly = false): Promise<NotificationDigestDto> {
+    const all = await this.db
       .select({ type: notifications.type, isRead: notifications.isRead, createdAt: notifications.createdAt })
       .from(notifications)
       .where(eq(notifications.userId, userId));
+    const rows = discussionOnly ? all.filter((n) => n.type === "blog") : all;
 
     const types: Record<NotificationType, number> = { system: 0, schedule: 0, mail: 0, blog: 0 };
     const startOfDay = new Date();
@@ -99,7 +107,9 @@ export class NotifyService {
       if (n.createdAt.getTime() >= startOfDay.getTime()) today += 1;
     }
 
-    const base = `日程 ${types.schedule} · 邮件 ${types.mail} · 系统 ${types.system}`;
+    const base = discussionOnly
+      ? `评论 ${types.blog}`
+      : `日程 ${types.schedule} · 邮件 ${types.mail} · 系统 ${types.system}`;
     const summary =
       rows.length === 0
         ? "暂无站内信 — 系统会在有提醒时自动投递"
@@ -136,11 +146,16 @@ export class NotifyService {
     return this.toDto(row);
   }
 
-  async create(userId: string, input: NotificationInput): Promise<NotificationDto> {
+  async create(userId: string, input: NotificationInput, allowAllTypes = true): Promise<NotificationDto> {
     const title = text(input?.title, MAX_TITLE);
     if (!title) throw new BadRequestException("通知标题不能为空");
+    const type = normalizeType(input?.type);
+    // 非 admin 的收件箱只有讨论类消息，不允许自己造日程/邮件/系统提醒
+    if (!allowAllTypes && type !== "blog") {
+      throw new BadRequestException("普通账号只能创建讨论类站内信");
+    }
     return this.push(userId, {
-      type: normalizeType(input?.type),
+      type,
       title,
       body: text(input?.body, MAX_BODY),
     });

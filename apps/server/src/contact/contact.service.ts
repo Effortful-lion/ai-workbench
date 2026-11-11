@@ -10,6 +10,7 @@ import {
 } from "@aiwb/shared";
 import { DB, type Db } from "../db/db.module";
 import { users } from "../db/schema";
+import { WorkspaceOwner } from "../common/workspace-owner";
 
 /** profile_json 信封：与简历共用同一个 JSON 列，写入时必须合并而不是覆盖 */
 interface ProfileBox {
@@ -135,7 +136,10 @@ function fromResumeBasics(box: ProfileBox): ContactProfile {
 
 @Injectable()
 export class ContactService {
-  constructor(@Inject(DB) private readonly db: Db) {}
+  constructor(
+    @Inject(DB) private readonly db: Db,
+    private readonly owner: WorkspaceOwner,
+  ) {}
 
   private box(row: typeof users.$inferSelect): ProfileBox {
     return (row.profileJson ?? {}) as ProfileBox;
@@ -166,10 +170,27 @@ export class ContactService {
     return { username: row.username, contact: this.publicOnly(this.toContact(row)) };
   }
 
-  async getOwn(userId: string): Promise<OwnContactDto> {
+  /**
+   * 站点主人的公开身份：游客首页用它拼 /b /p /t /c 公开页地址。
+   * 只返回账号名与昵称，联系方式仍走 /profile/public/:username 的可见性过滤。
+   */
+  async ownerPublic(): Promise<{ username: string; nickname: string }> {
+    const id = await this.owner.id();
+    const [row] = await this.db
+      .select({ username: users.username, nickname: users.nickname })
+      .from(users)
+      .where(eq(users.id, id));
+    if (!row) throw new NotFoundException("站点主人不存在");
+    return { username: row.username, nickname: row.nickname ?? row.username };
+  }
+
+  /** 本人/站点主人的完整联系信息；canEdit 由调用方按角色决定（member 只读） */
+  async getOwn(userId: string, canEdit = true): Promise<OwnContactDto> {
     const [row] = await this.db.select().from(users).where(eq(users.id, userId));
     if (!row) throw new NotFoundException("用户不存在");
-    return { username: row.username, canEdit: true, contact: this.toContact(row) };
+    const contact = this.toContact(row);
+    // 非 owner 只能看到公开渠道，私密渠道（仅自己可见）不外泄
+    return { username: row.username, canEdit, contact: canEdit ? contact : this.publicOnly(contact) };
   }
 
   async update(userId: string, input: unknown): Promise<OwnContactDto> {
