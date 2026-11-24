@@ -15,7 +15,7 @@ export class ToolsController {
   ) {}
 
   @Get()
-  @RequirePerm("aitools:read")
+  @RequirePerm("tools:read")
   list(@CurrentUser() user: AuthUser) {
     return this.registry.listForRole(user.role);
   }
@@ -23,20 +23,20 @@ export class ToolsController {
   // ---------- 自定义工具（AI 自写 / 面板手工） ----------
 
   @Get("custom")
-  @RequirePerm("aitools:read")
+  @RequirePerm("tools:read")
   listCustom(@CurrentUser() user: AuthUser) {
     return this.customTools.listMine(user.id);
   }
 
   /** 面板手工创建：直接启用（人工创建本身就是信任动作） */
   @Post("custom")
-  @RequirePerm("aitools:write")
+  @RequirePerm("tools:write")
   createCustom(@CurrentUser() user: AuthUser, @Body() body: UpsertCustomToolInput) {
     return this.customTools.create(user.id, body, "user", true);
   }
 
   @Patch("custom/:id")
-  @RequirePerm("aitools:write")
+  @RequirePerm("tools:write")
   updateCustom(
     @CurrentUser() user: AuthUser,
     @Param("id") id: string,
@@ -46,13 +46,13 @@ export class ToolsController {
   }
 
   @Post("custom/:id/toggle")
-  @RequirePerm("aitools:write")
+  @RequirePerm("tools:write")
   toggleCustom(@CurrentUser() user: AuthUser, @Param("id") id: string) {
     return this.customTools.toggle(user.id, id);
   }
 
   @Delete("custom/:id")
-  @RequirePerm("aitools:write")
+  @RequirePerm("tools:write")
   removeCustom(@CurrentUser() user: AuthUser, @Param("id") id: string) {
     return this.customTools.remove(user.id, id);
   }

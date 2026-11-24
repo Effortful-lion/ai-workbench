@@ -1,24 +1,26 @@
-import type { ReactNode } from "react";
+import { lazy, Suspense, type ReactNode } from "react";
 import { useAuthStore } from "../stores/auth";
 import { canOpenPanel } from "../lib/panel-access";
-import ModelsPanel from "../features/models/ModelsPanel";
-import AgentsPanel from "../features/agents/AgentsPanel";
-import KbPanel from "../features/kb/KbPanel";
-import BlogPanel from "../features/blog/BlogPanel";
-import ProjectsPanel from "../features/projects/ProjectsPanel";
-import CodePanel from "../features/code/CodePanel";
-import SchedulePanel from "../features/schedule/SchedulePanel";
-import MailPanel from "../features/mail/MailPanel";
-import NotifyPanel from "../features/notify/NotifyPanel";
-import CommercePanel from "../features/commerce/CommercePanel";
-import CrmPanel from "../features/crm/CrmPanel";
-import PipePanel from "../features/pipe/PipePanel";
-import ResumePanel from "../features/resume/ResumePanel";
-import ToolboxPanel from "../features/tools/ToolboxPanel";
-import ToolsManagerPanel from "../features/aitools/ToolsManagerPanel";
-import HistoryPanel from "../features/history/HistoryPanel";
-import StatsPanel from "../features/stats/StatsPanel";
-import GithubPanel from "../features/github/GithubPanel";
+
+// 面板按需加载：首屏只带 shell，19 个面板各自成独立 chunk
+const ModelsPanel = lazy(() => import("../features/models/ModelsPanel"));
+const AgentsPanel = lazy(() => import("../features/agents/AgentsPanel"));
+const KbPanel = lazy(() => import("../features/kb/KbPanel"));
+const BlogPanel = lazy(() => import("../features/blog/BlogPanel"));
+const ProjectsPanel = lazy(() => import("../features/projects/ProjectsPanel"));
+const CodePanel = lazy(() => import("../features/code/CodePanel"));
+const SchedulePanel = lazy(() => import("../features/schedule/SchedulePanel"));
+const MailPanel = lazy(() => import("../features/mail/MailPanel"));
+const NotifyPanel = lazy(() => import("../features/notify/NotifyPanel"));
+const CommercePanel = lazy(() => import("../features/commerce/CommercePanel"));
+const CrmPanel = lazy(() => import("../features/crm/CrmPanel"));
+const PipePanel = lazy(() => import("../features/pipe/PipePanel"));
+const ResumePanel = lazy(() => import("../features/resume/ResumePanel"));
+const ToolboxPanel = lazy(() => import("../features/tools/ToolboxPanel"));
+const ToolsManagerPanel = lazy(() => import("../features/aitools/ToolsManagerPanel"));
+const HistoryPanel = lazy(() => import("../features/history/HistoryPanel"));
+const StatsPanel = lazy(() => import("../features/stats/StatsPanel"));
+const GithubPanel = lazy(() => import("../features/github/GithubPanel"));
 import { PANEL_META, usePanelStore, type PanelId } from "../stores/panel";
 import { Icon } from "../lib/icons";
 
@@ -42,6 +44,16 @@ const PANEL_BODY: Record<PanelId, () => ReactNode> = {
   aitools: () => <ToolsManagerPanel />,
   gh: () => <GithubPanel />,
 };
+
+/** 首次打开某个面板时按需载入模块，用终端风占位避免白屏 */
+function PanelLoading({ title }: { title: string }) {
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-2 font-mono text-[12px] text-tx3">
+      <div className="text-acc">⠋ 正在载入 ~/p/{title}</div>
+      <div className="text-[11px]">// 模块按需加载，仅首次打开需要</div>
+    </div>
+  );
+}
 
 /** 状态 B · 面板区：tabs + 内容 + ⤢ 全屏 */
 export default function PanelZone() {
@@ -91,7 +103,9 @@ export default function PanelZone() {
       {/* 内容：危险面板（模型/邮件/自定义工具）只允许站点主人打开 */}
       <div className="min-h-0 flex-1 overflow-y-auto">
         {canOpenPanel(active, role) ? (
-          PANEL_BODY[active]()
+          <Suspense fallback={<PanelLoading title={PANEL_META[active].title} />}>
+            {PANEL_BODY[active]()}
+          </Suspense>
         ) : (
           <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center font-mono text-[12px] text-tx3">
             <div className="text-[13px] text-err">✗ {PANEL_META[active].title} 仅站点主人可用</div>

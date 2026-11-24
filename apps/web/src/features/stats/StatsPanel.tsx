@@ -1,5 +1,7 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { api } from "../../lib/api";
+import { QK } from "../../lib/query";
 import { asciiBar } from "../../lib/collector";
 
 interface Overview {
@@ -36,16 +38,10 @@ function fmtPath(p: string): string {
 /** 访问统计面板：PV/UV/热门页面/7日趋势（终端 ASCII bar chart 风格） */
 export default function StatsPanel() {
   const [days, setDays] = useState(7);
-  const [data, setData] = useState<Overview | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    setLoading(true);
-    api<Overview>(`/stats/overview?days=${days}`)
-      .then(setData)
-      .catch(() => setData(null))
-      .finally(() => setLoading(false));
-  }, [days]);
+  const { data = null, isLoading: loading } = useQuery({
+    queryKey: QK.stats(days),
+    queryFn: () => api<Overview>(`/stats/overview?days=${days}`),
+  });
 
   // 无数据时引导
   if (!loading && (!data || (data.pv === 0 && data.uv === 0))) {
@@ -60,6 +56,13 @@ export default function StatsPanel() {
     );
   }
 
+  if (loading) {
+    return (
+      <div className="mx-auto w-[min(860px,94%)] py-8 font-mono">
+        <div className="text-xs text-tx3">~/stats · 加载中…</div>
+      </div>
+    );
+  }
   if (!data) {
     return (
       <div className="mx-auto w-[min(860px,94%)] py-8 font-mono">

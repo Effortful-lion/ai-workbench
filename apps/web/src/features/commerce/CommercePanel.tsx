@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { QK, invalidate } from "../../lib/query";
 import type {
   CommerceAdDto,
   CommerceAdStatus,
@@ -112,49 +114,39 @@ export default function CommercePanel() {
   const canAccess = role === "owner";
   const canWrite = canAccess;
 
-  const [digest, setDigest] = useState<CommerceDigestDto | null>(null);
-  const [plans, setPlans] = useState<CommercePlanDto[]>([]);
-  const [orders, setOrders] = useState<CommerceOrderDto[]>([]);
-  const [ads, setAds] = useState<CommerceAdDto[]>([]);
-
-  const [tab, setTab] = useState<Tab>("overview");
-  const [statusFilter, setStatusFilter] = useState<CommerceOrderStatus | "all">("all");
-  const [query, setQuery] = useState("");
-
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [cmd, setCmd] = useState("");
-  const [cmdError, setCmdError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  const reload = useCallback(async () => {
-    if (!canAccess) {
-      setLoading(false);
-      return;
-    }
-    try {
-      const [d, p, o, a] = await Promise.all([
+  // 四个 GET 合并成一个 query：写操作整体失效，切回面板只走缓存
+  const commerceQuery = useQuery({
+    queryKey: QK.commerce,
+    queryFn: async () => {
+      const [digest, plans, orders, ads] = await Promise.all([
         api<CommerceDigestDto>("/commerce/digest"),
         api<CommercePlanDto[]>("/commerce/plans"),
         api<CommerceOrderDto[]>("/commerce/orders"),
         api<CommerceAdDto[]>("/commerce/ads"),
       ]);
-      setDigest(d);
-      setPlans(p);
-      setOrders(o);
-      setAds(a);
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoading(false);
-    }
-  }, [canAccess]);
+      return { digest, plans, orders, ads };
+    },
+    enabled: canAccess,
+  });
+  const digest = commerceQuery.data?.digest ?? null;
+  const plans = commerceQuery.data?.plans ?? [];
+  const orders = commerceQuery.data?.orders ?? [];
+  const ads = commerceQuery.data?.ads ?? [];
 
-  useEffect(() => {
-    void reload();
-  }, [reload]);
+  const [tab, setTab] = useState<Tab>("overview");
+  const [statusFilter, setStatusFilter] = useState<CommerceOrderStatus | "all">("all");
+  const [query, setQuery] = useState("");
+
+  const loading = commerceQuery.isLoading;
+  const [writeError, setWriteError] = useState<string | null>(null);
+  const error = writeError ?? commerceQuery.error?.message ?? null;
+  const [notice, setNotice] = useState<string | null>(null);
+  const [cmd, setCmd] = useState("");
+  const [cmdError, setCmdError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  /** 写操作后失效缓存，后台重取一次合并数据 */
+  const reload = () => invalidate(QK.commerce);
 
   const visibleOrders = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -171,7 +163,7 @@ export default function CommercePanel() {
     async (work: () => Promise<string>, fail: (msg: string) => void) => {
       setBusy(true);
       setNotice(null);
-      setError(null);
+      setWriteError(null);
       try {
         const msg = await work();
         setNotice(msg);
@@ -189,13 +181,13 @@ export default function CommercePanel() {
     execute(async () => {
       const next = await api<CommerceOrderDto>(`/commerce/orders/${o.id}/pay`, { method: "POST" });
       return `✓ ${next.customerName} · ${fmtMoney(next.amount)} 已支付`;
-    }, setError);
+    }, setWriteError);
 
   const refundOrder = (o: CommerceOrderDto) =>
     execute(async () => {
       const next = await api<CommerceOrderDto>(`/commerce/orders/${o.id}/refund`, { method: "POST" });
       return `✓ ${next.customerName} · ${fmtMoney(next.amount)} 已退款`;
-    }, setError);
+    }, setWriteError);
 
   const togglePlan = (p: CommercePlanDto) =>
     execute(async () => {
@@ -204,7 +196,7 @@ export default function CommercePanel() {
         body: JSON.stringify({ status: p.status === "active" ? "archived" : "active" }),
       });
       return next.status === "active" ? `✓ ${next.name} 已重新上架` : `✓ ${next.name} 已停售`;
-    }, setError);
+    }, setWriteError);
 
   const setAdStatus = (a: CommerceAdDto, status: CommerceAdStatus) =>
     execute(async () => {
@@ -213,12 +205,12 @@ export default function CommercePanel() {
         body: JSON.stringify({ status }),
       });
       return `✓ ${next.name} → ${AD_STATUS_META[next.status].label}`;
-    }, setError);
+    }, setWriteError);
 
   const runSeed = async () => {
     setBusy(true);
     setNotice(null);
-    setError(null);
+    setWriteError(null);
     try {
       const r = await api<CommerceSeedResult>("/commerce/seed", { method: "POST" });
       setNotice(
@@ -228,7 +220,7 @@ export default function CommercePanel() {
       );
       await reload();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setWriteError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }

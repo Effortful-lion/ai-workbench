@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
 import { useAuthStore } from "./stores/auth";
 import { refreshSession } from "./lib/api";
 import { useChatStore } from "./stores/chat";
@@ -7,23 +7,51 @@ import { useUiStore } from "./stores/ui";
 import TopBar from "./shell/TopBar";
 import StatusBar from "./shell/StatusBar";
 import HeroState from "./shell/HeroState";
-import ChatColumn from "./shell/ChatColumn";
 import PanelZone from "./shell/PanelZone";
-import CommandPalette from "./shell/CommandPalette";
-import CliOverlay from "./shell/CliOverlay";
+// 对话列带 react-markdown 全家桶，命令面板 / CLI 也不是首屏必需：按需加载
+const ChatColumn = lazy(() => import("./shell/ChatColumn"));
+const CommandPalette = lazy(() => import("./shell/CommandPalette"));
+const CliOverlay = lazy(() => import("./shell/CliOverlay"));
 import ConfirmDialog from "./shell/ConfirmDialog";
 import ToastHost from "./shell/ToastHost";
-import PublicResumePage from "./features/resume/PublicResumePage";
-import PublicToolboxPage from "./features/tools/PublicToolboxPage";
-import PublicContactPage from "./features/contact/PublicContactPage";
-import PublicBlogPage from "./features/blog/PublicBlogPage";
+// 公开只读页按需加载：首页不必带上 4 套公开页组件
+const PublicResumePage = lazy(() => import("./features/resume/PublicResumePage"));
+const PublicToolboxPage = lazy(() => import("./features/tools/PublicToolboxPage"));
+const PublicContactPage = lazy(() => import("./features/contact/PublicContactPage"));
+const PublicBlogPage = lazy(() => import("./features/blog/PublicBlogPage"));
 import { useVisitorCollector } from "./lib/collector";
 import { useHashRoute } from "./lib/route";
+
+/** 懒加载占位：终端风，避免首帧白屏 */
+function LazyFallback({ label }: { label: string }) {
+  return (
+    <div className="flex h-full w-full items-center justify-center font-mono text-[12px] text-tx3">
+      ⠋ {label}
+    </div>
+  );
+}
+
+function ChatPane() {
+  return (
+    <Suspense fallback={<LazyFallback label="正在载入对话…" />}>
+      <ChatColumn />
+    </Suspense>
+  );
+}
+
+/** 公开页懒加载占位 */
+function PublicPage({ children }: { children: ReactNode }) {
+  return (
+    <Suspense fallback={<LazyFallback label="正在载入页面…" />}>
+      {children}
+    </Suspense>
+  );
+}
 
 export default function App() {
   const user = useAuthStore((s) => s.user);
   const accessToken = useAuthStore((s) => s.accessToken);
-  const { theme, cliOpen, setPalette, mobileView, setMobileView } = useUiStore();
+  const { theme, cliOpen, paletteOpen, setPalette, mobileView, setMobileView } = useUiStore();
   const panelCount = usePanelStore((s) => s.open.length);
   const fullscreen = usePanelStore((s) => s.fullscreen);
   const currentId = useChatStore((s) => s.currentId);
@@ -107,16 +135,36 @@ export default function App() {
     }
   };
   const publicResume = decoded(window.location.pathname.match(/^\/p\/([^/]+)\/?$/)?.[1]);
-  if (publicResume) return <PublicResumePage username={publicResume} />;
+  if (publicResume)
+    return (
+      <PublicPage>
+        <PublicResumePage username={publicResume} />
+      </PublicPage>
+    );
   const publicToolbox = decoded(window.location.pathname.match(/^\/t\/([^/]+)\/?$/)?.[1]);
-  if (publicToolbox) return <PublicToolboxPage username={publicToolbox} />;
+  if (publicToolbox)
+    return (
+      <PublicPage>
+        <PublicToolboxPage username={publicToolbox} />
+      </PublicPage>
+    );
   const publicContact = decoded(window.location.pathname.match(/^\/c\/([^/]+)\/?$/)?.[1]);
-  if (publicContact) return <PublicContactPage username={publicContact} />;
+  if (publicContact)
+    return (
+      <PublicPage>
+        <PublicContactPage username={publicContact} />
+      </PublicPage>
+    );
   const blogMatch = window.location.pathname.match(/^\/b\/([^/]+)(?:\/([^/]+))?\/?$/);
   if (blogMatch) {
     const blogUser = decoded(blogMatch[1]);
     const blogSlug = decoded(blogMatch[2]);
-    if (blogUser) return <PublicBlogPage username={blogUser} slug={blogSlug ?? undefined} />;
+    if (blogUser)
+      return (
+        <PublicPage>
+          <PublicBlogPage username={blogUser} slug={blogSlug ?? undefined} />
+        </PublicPage>
+      );
   }
 
   // 换票期间不渲染登录页，否则会闪一下「请登录」
@@ -150,7 +198,9 @@ export default function App() {
       <TopBar />
       <main className="min-h-0 flex-1">
         {mode === "C" ? (
-          <CliOverlay />
+          <Suspense fallback={<LazyFallback label="正在载入终端…" />}>
+            <CliOverlay />
+          </Suspense>
         ) : mode === "A" ? (
           <HeroState />
         ) : (
@@ -159,14 +209,14 @@ export default function App() {
                 面板全屏：对话栏整体不渲染（仅收起对话，TopBar 保留），退出后恢复双栏 */}
             {panelCount === 0 ? (
               <div className="min-w-0 flex-1">
-                <ChatColumn />
+                <ChatPane />
               </div>
             ) : (
               !fullscreen && (
                 <div
                   className={`${mobileView === "chat" ? "flex" : "hidden"} w-full flex-col border-line lg:flex lg:w-[400px] lg:flex-none lg:border-r`}
                 >
-                  <ChatColumn />
+                  <ChatPane />
                 </div>
               )
             )}
@@ -191,7 +241,12 @@ export default function App() {
       <StatusBar mode={mode} />
       {/* 全局二次确认弹窗（退出登录/删除等，替代 window.confirm） */}
       <ConfirmDialog />
-      <CommandPalette />
+      {/* ⌘K 才挂载：命令面板模块不必随首屏下载 */}
+      {paletteOpen && (
+        <Suspense fallback={null}>
+          <CommandPalette />
+        </Suspense>
+      )}
       <ToastHost />
     </div>
   );

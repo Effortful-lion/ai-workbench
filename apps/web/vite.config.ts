@@ -18,4 +18,12 @@ export default defineConfig({
       "/socket.io": { target: "http://localhost:8700", ws: true },
     },
   },
+  // 生产预览（vite preview）也要能连本地后端，方便验证构建产物
+  preview: {
+    port: 4173,
+    proxy: {
+      "/api": "http://localhost:8700",
+      "/socket.io": { target: "http://localhost:8700", ws: true },
+    },
+  },
 });

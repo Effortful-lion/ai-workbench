@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import type { ModelDto } from "@aiwb/shared";
 import { api } from "../lib/api";
+import { QK } from "../lib/query";
 import PickerChip, { type PickerItem } from "./PickerChip";
 
 interface Props {
@@ -24,13 +25,9 @@ const STATUS_DOT: Record<ModelDto["status"], string> = {
 /** 终端风模型选择芯片（基于 PickerChip）：仅列 status=ok 的 chat 模型，
  *  首项「◎ 自动」= 服务端默认（芯片与列表同步显示默认模型名）。 */
 export default function ModelPicker({ value, onChange, align = "right", direction = "down", chipClass }: Props) {
-  const [models, setModels] = useState<ModelDto[] | null>(null);
-
-  useEffect(() => {
-    api<ModelDto[]>("/models")
-      .then((ms) => setModels(ms.filter((m) => m.kind === "chat" && m.status === "ok")))
-      .catch(() => setModels([]));
-  }, []);
+  // 与模型面板 / 首页 / 对话列共用同一份缓存，重复挂载不再打接口
+  const { data } = useQuery({ queryKey: QK.models, queryFn: () => api<ModelDto[]>("/models") });
+  const models = data ? data.filter((m) => m.kind === "chat" && m.status === "ok") : null;
 
   const defaultName = models?.find((m) => m.isDefault)?.modelName;
   const items: PickerItem[] = [

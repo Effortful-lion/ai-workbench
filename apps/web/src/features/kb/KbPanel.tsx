@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { QK, invalidate } from "../../lib/query";
 import type {
   BlogKbLinkDto, BlogPostDto, KbAskMode, KbAskResultDto, KbDocumentDto, KbFolderDto,
   KbFolderNodeDto, KbFolderTreeDto,
@@ -80,9 +82,25 @@ export default function KbPanel() {
   const canWrite = role === "owner"; // 个人站：知识库属于站点主人，注册用户只读
 
   const [tab, setTab] = useState<Tab>("chat");
-  const [docs, setDocs] = useState<KbDocumentDto[]>([]);
-  const [docsError, setDocsError] = useState<string | null>(null);
-  const [tree, setTree] = useState<KbFolderTreeDto>({ folders: [], links: [] });
+  // 文档 + 博客发布映射合并成一个 query（后者失败不阻塞文档）；目录树单独缓存
+  const [writeDocsError, setDocsError] = useState<string | null>(null);
+  const kbQuery = useQuery({
+    queryKey: QK.kb,
+    queryFn: async () => {
+      const [documents, links] = await Promise.all([
+        api<KbDocumentDto[]>("/kb/documents"),
+        api<BlogKbLinkDto[]>("/blog/kb-links").catch(() => [] as BlogKbLinkDto[]),
+      ]);
+      return { documents, links };
+    },
+  });
+  const docs = kbQuery.data?.documents ?? [];
+  const docsError = writeDocsError ?? kbQuery.error?.message ?? null;
+  const treeQuery = useQuery({
+    queryKey: QK.kbTree,
+    queryFn: () => api<KbFolderTreeDto>("/kb/folders"),
+  });
+  const tree = treeQuery.data ?? { folders: [], links: [] };
   /** 检索范围：null=全部文档（扁平层）；目录 id=该目录（含子目录）挂载的文档 */
   const [scopeFolderId, setScopeFolderId] = useState<string | null>(null);
   const [dragDoc, setDragDoc] = useState<string | null>(null);
@@ -122,10 +140,12 @@ export default function KbPanel() {
   /** kbDocId → 博客文章状态（批量一次拉取，KB 行按钮组据此渲染） */
   const [kbLinks, setKbLinks] = useState<Map<string, BlogKbLinkDto>>(new Map());
 
-  const reloadKbLinks = useCallback(async () => {
-    const links = await api<BlogKbLinkDto[]>("/blog/kb-links").catch(() => [] as BlogKbLinkDto[]);
-    setKbLinks(new Map(links.map((l) => [l.kbDocId, l])));
-  }, []);
+  // 本地 Map 仍支持发布/下架时即时改按钮状态；后台刷新后由缓存同步回来
+  useEffect(() => {
+    if (kbQuery.data?.links) {
+      setKbLinks(new Map(kbQuery.data.links.map((l) => [l.kbDocId, l])));
+    }
+  }, [kbQuery.data?.links]);
 
   const doPublishToBlog = async () => {
     if (!publishing) return;
@@ -186,36 +206,17 @@ export default function KbPanel() {
     }
   }, []);
 
-  const reload = useCallback(async () => {
-    try {
-      setDocs(await api<KbDocumentDto[]>("/kb/documents"));
-      setDocsError(null);
-    } catch (e) {
-      setDocsError(e instanceof Error ? e.message : String(e));
-    }
-    // 博客状态随文档列表一起刷新（批量一次，失败不阻塞文档）
-    void reloadKbLinks();
-  }, [reloadKbLinks]);
-
-  const reloadTree = useCallback(async () => {
-    try {
-      setTree(await api<KbFolderTreeDto>("/kb/folders"));
-    } catch {
-      // 目录视图加载失败不阻塞文档列表，静默保留旧数据
-    }
-  }, []);
-
-  useEffect(() => {
-    void reload();
-  }, [reload]);
+  /** 写操作后失效缓存；切回面板 30s 内直接用缓存 */
+  const reload = () => invalidate(QK.kb);
+  const reloadTree = () => invalidate(QK.kbTree);
 
   // 存在「处理中」文档时，每 3s 轮询列表直到全部翻转（embedded / error）
   const hasPending = docs.some((d) => d.status === "pending");
   useEffect(() => {
     if (!hasPending) return;
-    const t = setTimeout(() => void reload(), 3000);
+    const t = setTimeout(() => void kbQuery.refetch(), 3000);
     return () => clearTimeout(t);
-  }, [hasPending, docs, reload]);
+  }, [hasPending, docs, kbQuery]);
 
   // 新回答出来时滚到底部
   useEffect(() => {

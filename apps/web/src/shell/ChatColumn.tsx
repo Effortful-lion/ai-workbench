@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { QK } from "../lib/query";
 import { useChatStore } from "../stores/chat";
 import { useAgentsStore } from "../stores/agents";
 import { usePanelStore } from "../stores/panel";
@@ -29,13 +31,15 @@ export default function ChatColumn() {
   const { agents, load: loadAgents } = useAgentsStore();
   // 助手列表属于 admin 的管理数据；模型列表对普通用户开放（只能选，不能管）
   const isOwner = useAuthStore((s) => s.user?.role === "owner");
-  const [models, setModels] = useState<ModelDto[]>([]);
+  const { data: models = [] } = useQuery({
+    queryKey: QK.models,
+    queryFn: () => api<ModelDto[]>("/models"),
+  });
   const [text, setText] = useState("");
   const [showHistory, setShowHistory] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    void api<ModelDto[]>("/models").then(setModels).catch(() => setModels([]));
     if (isOwner) void loadAgents();
   }, [loadAgents, isOwner]);
 

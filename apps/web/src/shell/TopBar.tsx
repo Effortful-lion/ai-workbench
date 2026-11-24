@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { QK } from "../lib/query";
 import type {
   ContactChannel,
   ContactChannelType,
@@ -271,9 +273,13 @@ export default function TopBar() {
 /** 顶栏联系入口：hover / focus 出预览卡（绝对定位不撑高顶栏），点击或回车进 /c/:username */
 function ContactBadge({ username }: { username: string }) {
   const [open, setOpen] = useState(false);
-  const [contact, setContact] = useState<ContactProfile | null>(null);
-  // /profile/contact 对普通用户返回的是站点主人的资料，跳转要用它的 username
-  const [page, setPage] = useState(username);
+  // 与公开联系页共用缓存；/profile/contact 对普通用户返回站点主人的资料
+  const { data } = useQuery({
+    queryKey: QK.contact,
+    queryFn: () => api<OwnContactDto>("/profile/contact"),
+  });
+  const contact = data?.contact ?? null;
+  const page = data?.username || username;
   // 触屏没有 hover：不做预览，点击直接进公开页
   const [coarse] = useState(() =>
     typeof window !== "undefined" && typeof window.matchMedia === "function"
@@ -281,22 +287,6 @@ function ContactBadge({ username }: { username: string }) {
       : false,
   );
   const wrapRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    let alive = true;
-    api<OwnContactDto>("/profile/contact")
-      .then((d) => {
-        if (!alive) return;
-        setContact(d.contact);
-        if (d.username) setPage(d.username);
-      })
-      .catch(() => {
-        // 读取失败静默：预览卡退回默认文案，公开页仍可正常打开
-      });
-    return () => {
-      alive = false;
-    };
-  }, []);
 
   useEffect(() => {
     if (!open) return;

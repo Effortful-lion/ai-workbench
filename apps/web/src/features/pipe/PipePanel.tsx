@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { QK } from "../../lib/query";
 import type {
   ModelDto,
   PipeDigestDto,
@@ -211,7 +213,12 @@ export default function PipePanel() {
   const [editing, setEditing] = useState(false);
   const [draftSteps, setDraftSteps] = useState<{ name: string; instruction: string }[]>([]);
   const [draftModelId, setDraftModelId] = useState<string>("");
-  const [models, setModels] = useState<ModelDto[]>([]);
+  const { data: allModels } = useQuery({
+    queryKey: QK.models,
+    queryFn: () => api<ModelDto[]>("/models"),
+    enabled: canAccess,
+  });
+  const models = allModels?.filter((m) => m.kind === "chat" && m.status === "ok") ?? [];
 
   // 新建 SOP 弹窗（流水线组装台）：节点链可视化搭建
   const [createOpen, setCreateOpen] = useState(false);
@@ -273,14 +280,6 @@ export default function PipePanel() {
   useEffect(() => {
     void loadAll();
   }, [loadAll]);
-
-  // 编辑器需要可选模型列表：仅取对话类型且状态正常的模型
-  useEffect(() => {
-    if (!canAccess) return;
-    api<ModelDto[]>("/models")
-      .then((list) => setModels(list.filter((m) => m.kind === "chat" && m.status === "ok")))
-      .catch(() => setModels([]));
-  }, [canAccess]);
 
   const selectedSop = sops.find((s) => s.id === selectedSopId) ?? null;
   const selectedRun = runs.find((r) => r.id === selectedRunId) ?? null;

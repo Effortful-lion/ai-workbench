@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { QK, invalidate } from "../../lib/query";
 import type {
   CrmCustomerDto,
   CrmDigestDto,
@@ -110,81 +112,64 @@ export default function CrmPanel() {
   const canAccess = role === "owner";
   const canWrite = canAccess;
 
-  const [digest, setDigest] = useState<CrmDigestDto | null>(null);
-  const [customers, setCustomers] = useState<CrmCustomerDto[]>([]);
+  // 概览与客户列表合并缓存；客户详情按 id 单独缓存
+  const crmQuery = useQuery({
+    queryKey: QK.crm,
+    queryFn: async () => {
+      const [digest, customers] = await Promise.all([
+        api<CrmDigestDto>("/crm/digest"),
+        api<CrmCustomerDto[]>("/crm/customers"),
+      ]);
+      return { digest, customers };
+    },
+    enabled: canAccess,
+  });
+  const digest = crmQuery.data?.digest ?? null;
+  const customers = crmQuery.data?.customers ?? [];
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [detail, setDetail] = useState<CrmCustomerDto | null>(null);
-  const [followUps, setFollowUps] = useState<CrmFollowUpDto[]>([]);
+  const detailQuery = useQuery({
+    queryKey: QK.crmCustomer(selectedId ?? ""),
+    queryFn: async () => {
+      const [detail, followUps] = await Promise.all([
+        api<CrmCustomerDto>(`/crm/customers/${selectedId}`),
+        api<CrmFollowUpDto[]>(`/crm/customers/${selectedId}/followups`),
+      ]);
+      return { detail, followUps };
+    },
+    enabled: canAccess && !!selectedId,
+  });
+  const detail = detailQuery.data?.detail ?? null;
+  const followUps = detailQuery.data?.followUps ?? [];
 
   const [stageFilter, setStageFilter] = useState<CrmStage | "all">("all");
   const [staleOnly, setStaleOnly] = useState(false);
   const [query, setQuery] = useState("");
 
-  const [loading, setLoading] = useState(true);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const loading = crmQuery.isLoading;
+  const detailLoading = detailQuery.isLoading;
+  const [writeError, setWriteError] = useState<string | null>(null);
+  const error = writeError ?? (crmQuery.error ?? detailQuery.error)?.message ?? null;
   const [notice, setNotice] = useState<string | null>(null);
   const [cmd, setCmd] = useState("");
   const [cmdError, setCmdError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const loadDetail = useCallback(async (id: string) => {
-    setDetailLoading(true);
-    try {
-      const [c, f] = await Promise.all([
-        api<CrmCustomerDto>(`/crm/customers/${id}`),
-        api<CrmFollowUpDto[]>(`/crm/customers/${id}/followups`),
-      ]);
-      setDetail(c);
-      setFollowUps(f);
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setDetailLoading(false);
-    }
-  }, []);
-
-  const loadAll = useCallback(
-    async (preferredId?: string | null) => {
-      if (!canAccess) {
-        setLoading(false);
-        return;
-      }
-      try {
-        const [d, list] = await Promise.all([
-          api<CrmDigestDto>("/crm/digest"),
-          api<CrmCustomerDto[]>("/crm/customers"),
-        ]);
-        setDigest(d);
-        setCustomers(list);
-        setError(null);
-
-        const target =
-          preferredId && list.some((c) => c.id === preferredId) ? preferredId : list[0]?.id ?? null;
-        setSelectedId(target);
-        if (target) await loadDetail(target);
-        else {
-          setDetail(null);
-          setFollowUps([]);
-        }
-      } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
-      } finally {
-        setLoading(false);
-      }
-    },
-    [canAccess, loadDetail],
-  );
-
-  useEffect(() => {
-    void loadAll();
-  }, [loadAll]);
-
-  const selectCustomer = (id: string) => {
-    setSelectedId(id);
-    void loadDetail(id);
+  const loadDetail = (id: string) => invalidate(QK.crmCustomer(id));
+  /** 写操作后失效概览 + 当前客户详情；切回面板 30s 内直接用缓存 */
+  const loadAll = (preferredId?: string | null) => {
+    if (preferredId && customers.some((c) => c.id === preferredId)) setSelectedId(preferredId);
+    return invalidate(QK.crm, QK.crmCustomer(preferredId ?? selectedId ?? ""));
   };
+
+  // 列表回来后自动选中第一个客户
+  useEffect(() => {
+    if (!customers.length) return;
+    setSelectedId((prev) =>
+      prev && customers.some((c) => c.id === prev) ? prev : (customers[0]?.id ?? null),
+    );
+  }, [customers]);
+
+  const selectCustomer = (id: string) => setSelectedId(id);
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -202,7 +187,7 @@ export default function CrmPanel() {
     async (work: () => Promise<string>, fail: (msg: string) => void) => {
       setBusy(true);
       setNotice(null);
-      setError(null);
+      setWriteError(null);
       try {
         const msg = await work();
         setNotice(msg);
@@ -223,24 +208,24 @@ export default function CrmPanel() {
         body: JSON.stringify({ stage }),
       });
       return `✓ ${next.name} → ${STAGE_LABEL[next.stage]}`;
-    }, setError);
+    }, setWriteError);
 
   const removeFollowUp = async (f: CrmFollowUpDto) => {
     if (!detail) return;
-    setError(null);
+    setWriteError(null);
     try {
       await api(`/crm/customers/${detail.id}/followups/${f.id}`, { method: "DELETE" });
       setNotice("✓ 已删除一条跟进记录");
       await loadAll(detail.id);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setWriteError(e instanceof Error ? e.message : String(e));
     }
   };
 
   const runSeed = async () => {
     setBusy(true);
     setNotice(null);
-    setError(null);
+    setWriteError(null);
     try {
       const r = await api<CrmSeedResult>("/crm/seed", { method: "POST" });
       setNotice(
@@ -250,7 +235,7 @@ export default function CrmPanel() {
       );
       await loadAll();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setWriteError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }

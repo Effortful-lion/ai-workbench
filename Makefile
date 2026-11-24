@@ -241,6 +241,14 @@ typecheck: ## 全量 TypeScript 类型检查
 	@cd apps/web && npx tsc --noEmit
 	@echo "$(GREEN)✓$(RESET) web OK"
 
+lint: ## 全量 ESLint 检查（warn 级，不阻断 build）
+	@echo "$(YELLOW)→ eslint...$(RESET)"
+	@pnpm run lint
+
+test: ## 运行单元测试（vitest）
+	@echo "$(YELLOW)→ vitest...$(RESET)"
+	@pnpm run test
+
 log-tail: ## 实时追踪 server 日志
 	@if [ -f $(LOG_DIR)/server.log ]; then \
 		tail -f $(LOG_DIR)/server.log; \

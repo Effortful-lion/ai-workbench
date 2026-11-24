@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import type { ModelDto, ModelKind, ModelTestResult } from "@aiwb/shared";
 import { api } from "../../lib/api";
+import { QK, invalidate, queryClient } from "../../lib/query";
 import { useAuthStore } from "../../stores/auth";
 import { useToastStore } from "../../stores/toast";
 import { KIND_LABEL, PROVIDERS } from "./providers";
@@ -47,7 +49,10 @@ function optionalNumber(v: string): number | undefined {
 export default function ModelsPanel() {
   const role = useAuthStore((s) => s.user?.role);
   const canWrite = role === "owner";
-  const [models, setModels] = useState<ModelDto[]>([]);
+  const { data: models = [] } = useQuery({
+    queryKey: QK.models,
+    queryFn: () => api<ModelDto[]>("/models"),
+  });
   const [testing, setTesting] = useState<Record<string, string | null>>({});
   const [showAdd, setShowAdd] = useState(false);
   /** 编辑目标：非 null 时表单处于编辑模式（点击卡片触发） */
@@ -55,13 +60,8 @@ export default function ModelsPanel() {
   const [form, setForm] = useState<ModelForm>(emptyForm);
   const [filter, setFilter] = useState<"all" | ModelKind>("all");
 
-  const reload = useCallback(async () => {
-    setModels(await api<ModelDto[]>("/models"));
-  }, []);
-
-  useEffect(() => {
-    void reload().catch(() => setModels([]));
-  }, [reload]);
+  /** 写操作后让缓存失效并后台重取；30s 内切回面板则直接用缓存 */
+  const reload = () => invalidate(QK.models);
 
   const preset = useMemo(
     () => PROVIDERS.find((p) => p.value === form.provider),
@@ -148,7 +148,7 @@ export default function ModelsPanel() {
 
   /** 删除：先本地移除给出即时反馈，再以服务端列表收敛 */
   const remove = async (m: ModelDto) => {
-    setModels((list) => list.filter((x) => x.id !== m.id));
+    queryClient.setQueryData<ModelDto[]>(QK.models, (old) => old?.filter((x) => x.id !== m.id) ?? []);
     if (editing?.id === m.id) cancelEdit();
     try {
       await api(`/models/${m.id}`, { method: "DELETE" });

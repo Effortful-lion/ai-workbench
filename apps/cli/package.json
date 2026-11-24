@@ -10,7 +10,9 @@
   "main": "dist/cli.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "dev": "tsc -p tsconfig.json --watch"
+    "dev": "tsc -p tsconfig.json --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "echo \"no cli tests yet\""
   },
   "dependencies": {
     "@aiwb/shared": "workspace:*"

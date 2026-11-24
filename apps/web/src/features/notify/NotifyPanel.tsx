@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import type {
   NotificationDigestDto,
   NotificationDto,
@@ -6,6 +7,7 @@ import type {
   NotificationType,
 } from "@aiwb/shared";
 import { api } from "../../lib/api";
+import { QK, invalidate, queryClient } from "../../lib/query";
 import { useAuthStore } from "../../stores/auth";
 import { usePanelStore } from "../../stores/panel";
 
@@ -68,47 +70,58 @@ export default function NotifyPanel() {
   const canWrite = canAccess;
   const openPanel = usePanelStore((s) => s.openPanel);
 
-  const [digest, setDigest] = useState<NotificationDigestDto | null>(null);
-  const [items, setItems] = useState<NotificationDto[]>([]);
   const [typeFilter, setTypeFilter] = useState<NotificationType | "all">("all");
   const [unreadOnly, setUnreadOnly] = useState(false);
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [writeError, setWriteError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // 摘要与列表进缓存：切回面板 30s 内不再重复请求
+  const digestQuery = useQuery({
+    queryKey: QK.notifyDigest,
+    queryFn: () => api<NotificationDigestDto>("/notify/digest"),
+    enabled: canAccess,
+  });
+  const listQuery = useQuery({
+    queryKey: QK.notifyList,
+    queryFn: () => api<NotificationDto[]>("/notify/notifications"),
+    enabled: canAccess,
+  });
+  const digest = digestQuery.data ?? null;
+  const items = listQuery.data ?? [];
+  const loading = digestQuery.isLoading || listQuery.isLoading;
+  const error =
+    writeError ?? (digestQuery.error ?? listQuery.error)?.message ?? null;
+
+  // 摘要变化（含后台刷新）都同步顶栏红点
+  useEffect(() => {
+    if (typeof digestQuery.data?.unread === "number") publishUnread(digestQuery.data.unread);
+  }, [digestQuery.data?.unread]);
+
+  /** 直接改 query 缓存：点击后 0 网络往返就消红点，随后 invalidate 校准 */
+  const patchUnread = (delta: number) => {
+    const before = queryClient.getQueryData<NotificationDigestDto>(QK.notifyDigest)?.unread ?? 0;
+    const after = Math.max(0, before + delta);
+    queryClient.setQueryData<NotificationDigestDto>(QK.notifyDigest, (d) =>
+      d ? { ...d, unread: after } : d,
+    );
+    publishUnread(after);
+    return after;
+  };
+  const patchItem = (next: NotificationDto) =>
+    queryClient.setQueryData<NotificationDto[]>(QK.notifyList, (list) =>
+      list?.map((x) => (x.id === next.id ? next : x)) ?? list,
+    );
+
+  const reload = () => invalidate(QK.notifyDigest, QK.notifyList);
 
   const selected = useMemo(
     () => items.find((n) => n.id === selectedId) ?? null,
     [items, selectedId],
   );
-
-  const reload = useCallback(async () => {
-    if (!canAccess) {
-      setLoading(false);
-      return;
-    }
-    try {
-      const [dig, list] = await Promise.all([
-        api<NotificationDigestDto>("/notify/digest"),
-        api<NotificationDto[]>("/notify/notifications"),
-      ]);
-      setDigest(dig);
-      setItems(list);
-      setError(null);
-      publishUnread(dig.unread);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoading(false);
-    }
-  }, [canAccess]);
-
-  useEffect(() => {
-    void reload();
-  }, [reload]);
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -123,23 +136,28 @@ export default function NotifyPanel() {
   const openItem = async (n: NotificationDto) => {
     setSelectedId(n.id);
     if (n.isRead || !canWrite) return;
-    // 乐观更新：点开瞬间消掉红点与小圆点；失败回滚，成功后 reload 校准
-    const optimistic = Math.max(0, (digest?.unread ?? 0) - 1);
-    setItems((prev) => prev.map((x) => (x.id === n.id ? { ...x, isRead: true } : x)));
-    setDigest((d) => (d ? { ...d, unread: optimistic } : d));
-    publishUnread(optimistic);
+    // 乐观更新：点开瞬间消掉红点与小圆点；失败回滚，成功后 invalidate 校准
+    const before = queryClient.getQueryData<NotificationDigestDto>(QK.notifyDigest)?.unread ?? 0;
+    queryClient.setQueryData<NotificationDto[]>(QK.notifyList, (list) =>
+      list?.map((x) => (x.id === n.id ? { ...x, isRead: true } : x)) ?? list,
+    );
+    patchUnread(-1);
     try {
       const next = await api<NotificationDto>(`/notify/notifications/${n.id}`, {
         method: "PATCH",
         body: JSON.stringify({ isRead: true }),
       });
-      setItems((prev) => prev.map((x) => (x.id === next.id ? next : x)));
+      patchItem(next);
       void reload();
     } catch (e) {
-      setItems((prev) => prev.map((x) => (x.id === n.id ? { ...x, isRead: false } : x)));
-      setDigest((d) => (d ? { ...d, unread: optimistic + 1 } : d));
-      publishUnread(optimistic + 1);
-      setError(e instanceof Error ? e.message : String(e));
+      queryClient.setQueryData<NotificationDto[]>(QK.notifyList, (list) =>
+        list?.map((x) => (x.id === n.id ? { ...x, isRead: false } : x)) ?? list,
+      );
+      queryClient.setQueryData<NotificationDigestDto>(QK.notifyDigest, (d) =>
+        d ? { ...d, unread: before } : d,
+      );
+      publishUnread(before);
+      setWriteError(e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -149,40 +167,36 @@ export default function NotifyPanel() {
         method: "PATCH",
         body: JSON.stringify({ isRead: !n.isRead }),
       });
-      setItems((prev) => prev.map((x) => (x.id === next.id ? next : x)));
-      // 顶栏红点先行同步，reload 只做数据校准
-      const after = Math.max(0, (digest?.unread ?? 0) + (next.isRead ? -1 : 1));
-      setDigest((d) => (d ? { ...d, unread: after } : d));
-      publishUnread(after);
+      patchItem(next);
+      // 顶栏红点先行同步，invalidate 只做数据校准
+      patchUnread(next.isRead ? -1 : 1);
       setNotice(`✓ ${next.isRead ? "已标为已读" : "已标为未读"}`);
       void reload();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setWriteError(e instanceof Error ? e.message : String(e));
     }
   };
 
   const removeItem = async (n: NotificationDto) => {
     try {
       await api(`/notify/notifications/${n.id}`, { method: "DELETE" });
-      setItems((prev) => prev.filter((x) => x.id !== n.id));
+      queryClient.setQueryData<NotificationDto[]>(QK.notifyList, (list) =>
+        list?.filter((x) => x.id !== n.id) ?? list,
+      );
       if (selectedId === n.id) setSelectedId(null);
       // 删掉的是未读项时红点立即减一
-      if (!n.isRead) {
-        const after = Math.max(0, (digest?.unread ?? 0) - 1);
-        setDigest((d) => (d ? { ...d, unread: after } : d));
-        publishUnread(after);
-      }
+      if (!n.isRead) patchUnread(-1);
       setNotice("✓ 已删除该站内信");
       void reload();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setWriteError(e instanceof Error ? e.message : String(e));
     }
   };
 
   const runScan = async () => {
     setBusy(true);
     setNotice(null);
-    setError(null);
+    setWriteError(null);
     try {
       const r = await api<NotificationScanResult>("/notify/scan", { method: "POST" });
       setNotice(
@@ -192,7 +206,7 @@ export default function NotifyPanel() {
       );
       await reload();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setWriteError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -201,16 +215,18 @@ export default function NotifyPanel() {
   const runReadAll = async () => {
     setBusy(true);
     setNotice(null);
-    setError(null);
+    setWriteError(null);
     try {
       const r = await api<{ updated: number }>("/notify/read-all", { method: "POST" });
       // 服务端已全部置读：红点立即归零
-      setDigest((d) => (d ? { ...d, unread: 0 } : d));
+      queryClient.setQueryData<NotificationDigestDto>(QK.notifyDigest, (d) =>
+        d ? { ...d, unread: 0 } : d,
+      );
       publishUnread(0);
       setNotice(`✓ 已把 ${r.updated} 条标为已读`);
       await reload();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setWriteError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }

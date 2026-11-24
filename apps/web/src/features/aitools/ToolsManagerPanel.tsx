@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { QK, invalidate } from "../../lib/query";
 import {
   TOOL_KINDS,
   type CustomToolDto,
@@ -41,10 +43,19 @@ export default function ToolsManagerPanel() {
   const role = useAuthStore((s) => s.user?.role ?? "guest");
   const canWrite = role !== "guest";
 
-  const [schemas, setSchemas] = useState<ToolSchemaDto[]>([]);
-  const [customs, setCustoms] = useState<CustomToolDto[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const schemasQuery = useQuery({
+    queryKey: QK.tools,
+    queryFn: () => api<ToolSchemaDto[]>("/tools"),
+  });
+  const customsQuery = useQuery({
+    queryKey: QK.customTools,
+    queryFn: () => api<CustomToolDto[]>("/tools/custom"),
+  });
+  const schemas = schemasQuery.data ?? [];
+  const customs = customsQuery.data ?? [];
+  const loading = schemasQuery.isLoading || customsQuery.isLoading;
+  const [writeError, setWriteError] = useState<string | null>(null);
+  const error = writeError ?? (schemasQuery.error ?? customsQuery.error)?.message ?? null;
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -52,25 +63,8 @@ export default function ToolsManagerPanel() {
   const [confirmDel, setConfirmDel] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    try {
-      const [s, c] = await Promise.all([
-        api<ToolSchemaDto[]>("/tools"),
-        api<CustomToolDto[]>("/tools/custom"),
-      ]);
-      setSchemas(s);
-      setCustoms(c);
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+  /** 写操作后失效；切回面板 30s 内直接用缓存 */
+  const load = () => invalidate(QK.tools, QK.customTools);
 
   const rows = useMemo<Row[]>(() => {
     const byName = new Map(customs.map((c) => [c.name, c]));
@@ -149,7 +143,7 @@ export default function ToolsManagerPanel() {
       setNotice(dto.enabled ? `已停用 ${dto.name}` : `已启用 ${dto.name}，Agent 现在可以调用它`);
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setWriteError(e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -160,7 +154,7 @@ export default function ToolsManagerPanel() {
       setNotice(`已删除 ${dto.name}`);
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setWriteError(e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -191,7 +185,7 @@ export default function ToolsManagerPanel() {
             setNotice(msg);
             await load();
           }}
-          onError={setError}
+          onError={setWriteError}
         />
       )}
 

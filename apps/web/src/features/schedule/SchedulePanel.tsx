@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import type { ScheduleTaskDto, TaskPriority, TaskStatus } from "@aiwb/shared";
 import { api } from "../../lib/api";
+import { QK, invalidate, queryClient } from "../../lib/query";
 import { useAuthStore } from "../../stores/auth";
 
 /** 时间线可视范围：08:00 – 21:00，每小时 44px */
@@ -175,10 +177,13 @@ export default function SchedulePanel() {
   // 与原型 ACL 一致：owner rw，member ro；服务端 schedule:read / schedule:write 兜底
   const canWrite = role === "owner";
 
-  const [tasks, setTasks] = useState<ScheduleTaskDto[]>([]);
+  const { data: tasks = [], isLoading: loading, error: readError } = useQuery({
+    queryKey: QK.schedule,
+    queryFn: () => api<ScheduleTaskDto[]>("/schedule/tasks"),
+  });
   const [weekStart, setWeekStart] = useState<Date>(() => startOfWeek(new Date()));
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [writeError, setWriteError] = useState<string | null>(null);
+  const error = writeError ?? readError?.message ?? null;
   const [notice, setNotice] = useState<string | null>(null);
   const [cmd, setCmd] = useState("");
   const [cmdError, setCmdError] = useState<string | null>(null);
@@ -192,20 +197,8 @@ export default function SchedulePanel() {
     return () => window.clearInterval(timer);
   }, []);
 
-  const reload = useCallback(async () => {
-    try {
-      setTasks(await api<ScheduleTaskDto[]>("/schedule/tasks"));
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void reload();
-  }, [reload]);
+  /** 写操作后失效缓存；切回面板 30s 内直接用缓存 */
+  const reload = () => invalidate(QK.schedule);
 
   const weekDays = useMemo(
     () => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)),
@@ -336,7 +329,7 @@ export default function SchedulePanel() {
     }
     setBusy(true);
     setCmdError(null);
-    setError(null);
+    setWriteError(null);
     try {
       const payload = {
         title,
@@ -432,12 +425,15 @@ export default function SchedulePanel() {
         method: "PATCH",
         body: JSON.stringify({ status }),
       });
-      setTasks((prev) => prev.map((x) => (x.id === t.id ? t : x)));
+      queryClient.setQueryData<ScheduleTaskDto[]>(QK.schedule, (prev) =>
+        prev?.map((x) => (x.id === t.id ? t : x)) ?? prev,
+      );
+      void invalidate(QK.schedule);
       setNotice(
         `✓ ${t.title} → ${status === "done" ? "已完成" : status === "canceled" ? "已取消" : "待办"}`,
       );
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setWriteError(e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -445,10 +441,13 @@ export default function SchedulePanel() {
     if (!window.confirm(`删除任务「${task.title}」？`)) return;
     try {
       await api(`/schedule/tasks/${task.id}`, { method: "DELETE" });
-      setTasks((prev) => prev.filter((x) => x.id !== task.id));
+      queryClient.setQueryData<ScheduleTaskDto[]>(QK.schedule, (prev) =>
+        prev?.filter((x) => x.id !== task.id) ?? prev,
+      );
+      void invalidate(QK.schedule);
       setNotice(`✓ 已删除 ${task.title}`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setWriteError(e instanceof Error ? e.message : String(e));
     }
   };
 

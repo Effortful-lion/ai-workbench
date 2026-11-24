@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { api } from "../../lib/api";
+import { QK, queryClient, invalidate } from "../../lib/query";
 import { useAuthStore } from "../../stores/auth";
 import { MarkdownText } from "../../lib/markdown";
 
@@ -238,38 +240,31 @@ type TabId = "overview" | "repos" | "activity" | "inbox";
 export default function GithubPanel() {
   // 观察窗数据归站点主人；普通用户只读，不能绑定/更换 Token
   const canManage = useAuthStore((s) => s.user?.role === "owner");
-  const [account, setAccount] = useState<GithubAccount | null | undefined>(undefined);
-  const [profile, setProfile] = useState<GhProfile | null>(null);
-  const [repos, setRepos] = useState<GhRepo[]>([]);
-  const [reposFetchedAt, setReposFetchedAt] = useState<string>("");
-  const [reposStale, setReposStale] = useState(false);
+  const accountQuery = useQuery({
+    queryKey: QK.ghAccount,
+    queryFn: () => api<GithubAccount | null>("/github/account"),
+  });
+  const account = accountQuery.isLoading ? undefined : (accountQuery.data ?? null);
   const [q, setQ] = useState("");
   const [tab, setTab] = useState<TabId>("overview");
   const [selected, setSelected] = useState<{ owner: string; name: string } | null>(null);
-  const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    api<GithubAccount | null>("/github/account")
-      .then(setAccount)
-      .catch(() => setAccount(null));
-  }, []);
-
-  useEffect(() => {
-    if (!account) return;
-    setLoading(true);
-    Promise.all([
-      api<GhProfile>("/github/profile"),
-      api<ReposResp>(`/github/repos${q ? `?q=${encodeURIComponent(q)}` : ""}`),
-    ])
-      .then(([p, r]) => {
-        setProfile(p);
-        setRepos(r.items);
-        setReposFetchedAt(r.fetchedAt);
-        setReposStale(r.stale);
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [account, q]);
+  // profile + repos 合并缓存：搜索词进 key，切回面板 30s 内零请求
+  const ghQuery = useQuery({
+    queryKey: QK.ghRepos(q),
+    queryFn: () =>
+      Promise.all([
+        api<GhProfile>("/github/profile"),
+        api<ReposResp>(`/github/repos${q ? `?q=${encodeURIComponent(q)}` : ""}`),
+      ]) as Promise<[GhProfile, ReposResp]>,
+    enabled: !!account,
+  });
+  const profile = ghQuery.data?.[0] ?? null;
+  const repos = ghQuery.data?.[1]?.items ?? [];
+  const reposFetchedAt = ghQuery.data?.[1]?.fetchedAt ?? "";
+  const reposStale = ghQuery.data?.[1]?.stale ?? false;
+  const [refreshing, setRefreshing] = useState(false);
+  const loading = ghQuery.isLoading || refreshing;
 
   if (account === undefined) {
     return (
@@ -291,26 +286,25 @@ export default function GithubPanel() {
     return (
       <PatSetup
         account={account ?? undefined}
-        onSaved={() => api<GithubAccount>("/github/account").then(setAccount)}
-        onRemoved={() => setAccount(null)}
+        onSaved={() => {
+          void accountQuery.refetch();
+          void invalidate(QK.ghRepos(q));
+        }}
+        onRemoved={() => queryClient.setQueryData(QK.ghAccount, null)}
       />
     );
   }
 
+  /** 手动强刷：带 refresh=1 跳过服务端快照，结果写回当前缓存 */
   const refresh = () => {
-    setLoading(true);
+    setRefreshing(true);
     Promise.all([
       api<GhProfile>("/github/profile?refresh=1"),
       api<ReposResp>(`/github/repos?refresh=1${q ? `&q=${encodeURIComponent(q)}` : ""}`),
     ])
-      .then(([p, r]) => {
-        setProfile(p);
-        setRepos(r.items);
-        setReposFetchedAt(r.fetchedAt);
-        setReposStale(r.stale);
-      })
+      .then(([p, r]) => queryClient.setQueryData<[GhProfile, ReposResp]>(QK.ghRepos(q), [p, r]))
       .catch(() => {})
-      .finally(() => setLoading(false));
+      .finally(() => setRefreshing(false));
   };
 
   return (
@@ -407,33 +401,42 @@ function OverviewTab({
   canManage: boolean;
   onGoInbox: () => void;
 }) {
-  const [cal, setCal] = useState<CalendarData | null>(null);
-  const [digest, setDigest] = useState<DigestData | null>(null);
+  // 日历 / 趋势 / 收件箱 / 简报合并成一个 query：切 tab 回来不再重复请求
+  const overviewQuery = useQuery({
+    queryKey: QK.ghOverview,
+    queryFn: async () => {
+      const [cal, trending, inbox, digest] = await Promise.all([
+        api<CalendarData>("/github/activity/calendar").catch(() => null),
+        api<TrendingData>("/github/trending").catch(() => null),
+        canManage ? api<InboxData>("/github/inbox").catch(() => null) : Promise.resolve(null),
+        // 收件箱与 AI 简报属于站点主人的个人数据，普通用户不请求
+        canManage ? api<DigestData>("/github/inbox/digest").catch(() => null) : Promise.resolve(null),
+      ]);
+      return { cal, trending, inbox, digest };
+    },
+  });
+  const cal = overviewQuery.data?.cal ?? null;
+  const trending = overviewQuery.data?.trending ?? null;
+  const inbox = overviewQuery.data?.inbox ?? null;
+  const digest = overviewQuery.data?.digest ?? null;
+  const err = overviewQuery.error?.message ?? null;
   const [digestBusy, setDigestBusy] = useState(false);
-  const [inbox, setInbox] = useState<InboxData | null>(null);
-  const [trending, setTrending] = useState<TrendingData | null>(null);
-  const [err, setErr] = useState<string | null>(null);
 
   /** force = 跳过服务端快照（空简报只缓存 5 分钟），用户手动刷新时用 */
   const loadDigest = (force = false) => {
     if (force) setDigestBusy(true);
     api<DigestData>(`/github/inbox/digest${force ? "?refresh=1" : ""}`)
-      .then(setDigest)
+      .then((d) =>
+        queryClient.setQueryData<{
+          cal: CalendarData | null;
+          trending: TrendingData | null;
+          inbox: InboxData | null;
+          digest: DigestData | null;
+        }>(QK.ghOverview, (prev) => (prev ? { ...prev, digest: d } : prev)),
+      )
       .catch(() => {})
       .finally(() => setDigestBusy(false));
   };
-
-  useEffect(() => {
-    api<CalendarData>("/github/activity/calendar")
-      .then(setCal)
-      .catch((e) => setErr(e instanceof Error ? e.message : "加载失败"));
-    api<TrendingData>("/github/trending").then(setTrending).catch(() => {});
-    // 收件箱与 AI 简报属于站点主人的个人数据，普通用户不请求
-    if (canManage) {
-      loadDigest();
-      api<InboxData>("/github/inbox").then(setInbox).catch(() => {});
-    }
-  }, [canManage]);
 
   return (
     <div className="space-y-5">
@@ -626,14 +629,11 @@ function StatCell({ label, value, warn, onClick }: { label: string; value?: numb
 // ── Tab 4 · 收件 ────────────────────────────────────────
 
 function InboxTab() {
-  const [inbox, setInbox] = useState<InboxData | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-
-  useEffect(() => {
-    api<InboxData>("/github/inbox")
-      .then(setInbox)
-      .catch((e) => setErr(e instanceof Error ? e.message : "加载失败"));
-  }, []);
+  const { data: inbox = null, error } = useQuery({
+    queryKey: QK.ghInbox,
+    queryFn: () => api<InboxData>("/github/inbox"),
+  });
+  const err = error?.message ?? null;
 
   if (err) return <div className="rounded border border-err/50 bg-err/5 px-3 py-2 text-[11px] text-err">{err}</div>;
   if (!inbox) return <div className="py-16 text-center text-[11px] text-tx3">加载中…</div>;
@@ -1214,18 +1214,17 @@ function langColor(lang: string, idx: number): string {
 }
 
 function ActivityTab() {
-  const [langs, setLangs] = useState<LanguagesData | null>(null);
-  const [cal, setCal] = useState<CalendarData | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-
-  useEffect(() => {
-    Promise.all([api<LanguagesData>("/github/activity/languages"), api<CalendarData>("/github/activity/calendar")])
-      .then(([l, c]) => {
-        setLangs(l);
-        setCal(c);
-      })
-      .catch((e) => setErr(e instanceof Error ? e.message : "加载失败"));
-  }, []);
+  const { data, error } = useQuery({
+    queryKey: QK.ghActivity,
+    queryFn: () =>
+      Promise.all([
+        api<LanguagesData>("/github/activity/languages"),
+        api<CalendarData>("/github/activity/calendar"),
+      ]) as Promise<[LanguagesData, CalendarData]>,
+  });
+  const langs = data?.[0] ?? null;
+  const cal = data?.[1] ?? null;
+  const err = error?.message ?? null;
 
   // 近 90 天 + 月度对比（从日历推导）
   const { last90, thisMonth, lastMonth } = useMemo(() => {

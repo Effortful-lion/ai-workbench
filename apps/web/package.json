@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite --host",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "echo \"no web tests yet\""
   },
   "dependencies": {
     "@aiwb/shared": "workspace:*",

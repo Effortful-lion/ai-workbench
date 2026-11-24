@@ -1,13 +1,16 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import type {
   BlogCommentDto, BlogCommentPageDto, BlogModerationItemDto, BlogPublicPostDetailDto, BlogPublicPostDto,
 } from "@aiwb/shared";
 import { api } from "../../lib/api";
+import { QK, invalidate } from "../../lib/query";
 import { Icon } from "../../lib/icons";
 import { useAuthStore } from "../../stores/auth";
 import PublicBackLink from "../public/PublicBackLink";
 import BlogCardWall from "./BlogCardWall";
-import BlogReader from "./BlogReader";
+// 阅读器带 markdown 渲染，列表页不必下载：点开文章时再加载
+const BlogReader = lazy(() => import("./BlogReader"));
 
 /** 游客公开博客：/b/:username（卡片墙）↔ /b/:username/:slug（FLIP 铺满的独立阅读页） */
 export default function PublicBlogPage({ username, slug }: { username: string; slug?: string }) {
@@ -20,11 +23,17 @@ export default function PublicBlogPage({ username, slug }: { username: string; s
   const [comments, setComments] = useState<BlogCommentPageDto | null>(null);
   const [commentsPage, setCommentsPage] = useState(1);
   const [loadingMore, setLoadingMore] = useState(false);
-  /** 博主视角：待审评论数（公开页看不到待审评论，需要入口告知） */
-  const [pendingCount, setPendingCount] = useState(0);
-
   // 博主视角（含评论审核入口）仅站点主人本人
   const isOwner = !!viewer && viewer.username === username && viewer.role === "owner";
+
+  /** 博主视角：待审评论数（公开页看不到待审评论，需要入口告知） */
+  // 待审核数与管理面板共用缓存；未登录/无权限不请求
+  const { data: pending = [] } = useQuery({
+    queryKey: QK.blogModeration("pending"),
+    queryFn: () => api<BlogModerationItemDto[]>("/blog/moderation/comments?status=pending"),
+    enabled: isOwner,
+  });
+  const pendingCount = pending.length;
 
   const panelRef = useRef<HTMLDivElement>(null);
   const jumpFrom = useRef<DOMRect | null>(null);
@@ -94,18 +103,6 @@ export default function PublicBlogPage({ username, slug }: { username: string; s
       setLoadingMore(false);
     }
   }, [openSlug, commentsPage, loadingMore, loadComments]);
-
-  // 博主本人浏览自己的公开博客：拉待审计数（未登录/无权限静默忽略）
-  useEffect(() => {
-    if (!isOwner) return;
-    let alive = true;
-    api<BlogModerationItemDto[]>("/blog/moderation/comments?status=pending")
-      .then((d) => alive && setPendingCount(d.length))
-      .catch(() => alive && setPendingCount(0));
-    return () => {
-      alive = false;
-    };
-  }, [isOwner, openSlug]);
 
   // FLIP：卡片矩形 → 全屏（450ms）
   useLayoutEffect(() => {
@@ -184,6 +181,8 @@ export default function PublicBlogPage({ username, slug }: { username: string; s
       setCommentsPage(1);
       setPost((p) => (p ? { ...p, commentCount: p.commentCount + 1 } : p));
     }
+    // 新评论可能进入待审：让博主看到的待审核数同步刷新
+    void invalidate(QK.blogModeration("pending"));
     return c;
   };
 
@@ -239,17 +238,25 @@ export default function PublicBlogPage({ username, slug }: { username: string; s
             ) : !post ? (
               <div className="flex h-full items-center justify-center text-[12px] text-tx3">⠋ 读取文章…</div>
             ) : (
-              <BlogReader
-                post={post}
-                comments={comments}
-                author={viewer?.username ?? null}
-                onBack={close}
-                onNavigate={(s) => open(s)}
-                onSubmitComment={submitComment}
-                onLoadMoreComments={() => void loadMoreComments()}
-                loadingMoreComments={loadingMore}
-                commentsNotice={<ModerationNotice count={pendingCount} />}
-              />
+              <Suspense
+                fallback={
+                  <div className="flex h-full items-center justify-center text-[12px] text-tx3">
+                    ⠋ 正在载入阅读器…
+                  </div>
+                }
+              >
+                <BlogReader
+                  post={post}
+                  comments={comments}
+                  author={viewer?.username ?? null}
+                  onBack={close}
+                  onNavigate={(s) => open(s)}
+                  onSubmitComment={submitComment}
+                  onLoadMoreComments={() => void loadMoreComments()}
+                  loadingMoreComments={loadingMore}
+                  commentsNotice={<ModerationNotice count={pendingCount} />}
+                />
+              </Suspense>
             )}
           </div>
         </div>

@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import type { ResumeDto, ResumeImportResult } from "@aiwb/shared";
 import { api } from "../../lib/api";
+import { QK, queryClient } from "../../lib/query";
 import ResumeCard from "./ResumeCard";
 
 /** 带行号的 JSON 编辑器：行号栏与文本框同字号/行高，滚动同步，方便定位报错行 */
@@ -50,8 +52,12 @@ function LineNumberedEditor({
 
 /** 个人简历面板：导入(文本/PDF/Word) → 解析 → 文档卡渲染 */
 export default function ResumePanel() {
-  const [data, setData] = useState<ResumeDto | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const resumeQuery = useQuery({
+    queryKey: QK.resume,
+    queryFn: () => api<ResumeDto>("/resume/me"),
+  });
+  const data = resumeQuery.data ?? null;
+  const error = resumeQuery.error?.message ?? null;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
@@ -65,12 +71,6 @@ export default function ResumePanel() {
   const [preview, setPreview] = useState<ResumeImportResult | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    api<ResumeDto>("/resume/me")
-      .then(setData)
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
-  }, []);
 
   const startEdit = () => {
     if (!data) return;
@@ -129,7 +129,7 @@ export default function ResumePanel() {
         method: "PUT",
         body: JSON.stringify({ profile: preview.profile }),
       });
-      setData(next);
+      queryClient.setQueryData(QK.resume, next);
       setPreview(null);
       setPasteText("");
       setImporting(false);
@@ -169,7 +169,7 @@ export default function ResumePanel() {
         method: "PUT",
         body: JSON.stringify({ profile: parsed }),
       });
-      setData(next);
+      queryClient.setQueryData(QK.resume, next);
       setEditing(false);
       setNotice("✓ 已写入 ~/me/profile.json");
     } catch (e) {

@@ -8,10 +8,22 @@
     "dev:web": "pnpm --filter @aiwb/web dev",
     "cli": "node apps/cli/dist/cli.js",
     "dev:cli": "pnpm --filter @aiwb/cli dev",
-    "build": "pnpm -r run build"
+    "build": "pnpm run typecheck && pnpm -r run build",
+    "typecheck": "pnpm -r run typecheck",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "test": "pnpm -r --if-present run test"
   },
   "engines": {
     "node": ">=20"
   },
-  "packageManager": "pnpm@11.22.0"
+  "packageManager": "pnpm@11.22.0",
+  "devDependencies": {
+    "@eslint/js": "^9.18.0",
+    "eslint": "^9.18.0",
+    "eslint-plugin-react-hooks": "^5.1.0",
+    "globals": "^15.14.0",
+    "prettier": "^3.4.2",
+    "typescript-eslint": "^8.20.0"
+  }
 }

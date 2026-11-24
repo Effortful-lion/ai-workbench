@@ -7,7 +7,9 @@
     "build": "nest build",
     "start": "node dist/main.js",
     "start:lightrag": "KB_PROVIDER=lightrag LIGHTRAG_URL=http://localhost:9621 LIGHTRAG_API_KEY=$(grep '^LIGHTRAG_API_KEY=' ../../services/lightrag/.env | cut -d= -f2-) ADMIN_USER=$(grep '^ADMIN_USER=' ../../.env | cut -d= -f2-) ADMIN_PASS=$(grep '^ADMIN_PASS=' ../../.env | cut -d= -f2-) MINIO_ACCESS_KEY=$(grep '^ADMIN_USER=' ../../.env | cut -d= -f2-) MINIO_SECRET_KEY=$(grep '^ADMIN_PASS=' ../../.env | cut -d= -f2-) node --enable-source-maps dist/main",
-    "db:push": "drizzle-kit push"
+    "db:push": "drizzle-kit push",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@aiwb/shared": "workspace:*",
@@ -37,6 +39,7 @@
     "@types/node": "^26.6.6",
     "@types/nodemailer": "^8.0.2",
     "drizzle-kit": "^0.31.11",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "vitest": "^3.0.5"
   }
 }

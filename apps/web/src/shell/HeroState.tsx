@@ -1,4 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { QK } from "../lib/query";
 import type { ModelDto } from "@aiwb/shared";
 import { api } from "../lib/api";
 import { displayName, useAuthStore } from "../stores/auth";
@@ -133,7 +135,13 @@ export default function HeroState() {
   // 游客：公开模块直接跳公开页，需要站点主人 username
   const publicOwner = usePublicOwner(!user);
   const [text, setText] = useState("");
-  const [modelCount, setModelCount] = useState<number | null>(null);
+  // 与模型面板 / 对话列 / 模型选择器共用缓存；游客不请求
+  const { data: modelList } = useQuery({
+    queryKey: QK.models,
+    queryFn: () => api<ModelDto[]>("/models"),
+    enabled: !!user,
+  });
+  const modelCount = user && modelList ? modelList.filter((m) => m.status === "ok").length : null;
   const [history, setHistory] = useState<string[]>(loadHistory);
   // 招呼语拆成「前缀 + 昵称（异色）+ 感叹号」；首帧直接完整渲染，不再逐字打出
   const greetHead = `${greeting()}，`;
@@ -163,17 +171,6 @@ export default function HeroState() {
       // 同上
     }
   };
-
-  useEffect(() => {
-    // 游客不请求模型列表（需要登录），也就没有「N 个模型在线」的说法
-    if (!user) {
-      setModelCount(null);
-      return;
-    }
-    api<ModelDto[]>("/models")
-      .then((ms) => setModelCount(ms.filter((m) => m.status === "ok").length))
-      .catch(() => setModelCount(null));
-  }, [user]);
 
   const submit = (e: FormEvent) => {
     e.preventDefault();

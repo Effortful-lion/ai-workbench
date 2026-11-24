@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { QK, invalidate } from "../../lib/query";
 import type {
   CodeFileDetailDto,
   CodeFileDto,
@@ -58,15 +60,25 @@ export default function CodePanel() {
   // 与原型 ACL 一致：owner rw，member ro；服务端 code:read / code:write 兜底
   const canWrite = role === "owner";
 
-  const [repos, setRepos] = useState<CodeRepoDto[]>([]);
+  const reposQuery = useQuery({
+    queryKey: QK.codeRepos,
+    queryFn: () => api<CodeRepoDto[]>("/code/repos"),
+  });
+  const repos = reposQuery.data ?? [];
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [files, setFiles] = useState<CodeFileDto[]>([]);
+  const filesQuery = useQuery({
+    queryKey: QK.codeFiles(selectedId ?? ""),
+    queryFn: () => api<CodeFileDto[]>(`/code/repos/${selectedId}/files`),
+    enabled: !!selectedId,
+  });
+  const files = filesQuery.data ?? [];
   const [detail, setDetail] = useState<CodeFileDetailDto | null>(null);
   const [draft, setDraft] = useState("");
 
-  const [loading, setLoading] = useState(true);
-  const [filesLoading, setFilesLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const loading = reposQuery.isLoading;
+  const filesLoading = filesQuery.isLoading;
+  const [writeError, setWriteError] = useState<string | null>(null);
+  const error = writeError ?? (reposQuery.error ?? filesQuery.error)?.message ?? null;
   const [notice, setNotice] = useState<string | null>(null);
   const [cmd, setCmd] = useState("");
   const [cmdError, setCmdError] = useState<string | null>(null);
@@ -74,46 +86,21 @@ export default function CodePanel() {
 
   const selected = repos.find((r) => r.id === selectedId) ?? null;
 
-  const reloadRepos = useCallback(async () => {
-    try {
-      const list = await api<CodeRepoDto[]>("/code/repos");
-      setRepos(list);
-      setSelectedId((prev) =>
-        prev && list.some((r) => r.id === prev) ? prev : (list[0]?.id ?? null),
-      );
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const reloadRepos = () => invalidate(QK.codeRepos);
+  const loadFiles = (repoId: string) => invalidate(QK.codeFiles(repoId));
 
-  const loadFiles = useCallback(async (repoId: string) => {
-    setFilesLoading(true);
-    try {
-      setFiles(await api<CodeFileDto[]>(`/code/repos/${repoId}/files`));
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setFilesLoading(false);
-    }
-  }, []);
-
+  // 列表回来后自动选中第一个仓库
   useEffect(() => {
-    void reloadRepos();
-  }, [reloadRepos]);
+    if (!repos.length) return;
+    setSelectedId((prev) =>
+      prev && repos.some((r) => r.id === prev) ? prev : (repos[0]?.id ?? null),
+    );
+  }, [repos]);
 
   useEffect(() => {
     setDetail(null);
     setDraft("");
-    if (!selectedId) {
-      setFiles([]);
-      return;
-    }
-    void loadFiles(selectedId);
-  }, [selectedId, loadFiles]);
+  }, [selectedId]);
 
   const openFile = async (file: CodeFileDto) => {
     if (!selectedId) return;
@@ -121,9 +108,9 @@ export default function CodePanel() {
       const d = await api<CodeFileDetailDto>(`/code/repos/${selectedId}/files/${file.id}`);
       setDetail(d);
       setDraft(d.content);
-      setError(null);
+      setWriteError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setWriteError(e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -190,7 +177,7 @@ export default function CodePanel() {
       setNotice(`✓ ${d.path} 已保存`);
       await Promise.all([loadFiles(selectedId), reloadRepos()]);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setWriteError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -200,9 +187,9 @@ export default function CodePanel() {
   const upload = async (file: File | undefined) => {
     if (!selectedId || !file || busy) return;
     setNotice(null);
-    setError(null);
+    setWriteError(null);
     if (!isTextFile(file)) {
-      setError("一期仅支持文本类代码文件（.ts/.js/.json/.md/.go/.py/.sh…）");
+      setWriteError("一期仅支持文本类代码文件（.ts/.js/.json/.md/.go/.py/.sh…）");
       return;
     }
     setBusy(true);
@@ -226,7 +213,7 @@ export default function CodePanel() {
       setNotice(`✓ ${existing ? "已覆盖" : "已上传"} ${d.path}`);
       await Promise.all([loadFiles(selectedId), reloadRepos()]);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setWriteError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -251,7 +238,7 @@ export default function CodePanel() {
       setNotice(`✓ 仓库 ${selected.name} 已删除`);
       await reloadRepos();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setWriteError(e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -266,7 +253,7 @@ export default function CodePanel() {
       setNotice(`✓ 已删除 ${file.path}`);
       await Promise.all([loadFiles(selectedId), reloadRepos()]);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setWriteError(e instanceof Error ? e.message : String(e));
     }
   };
 

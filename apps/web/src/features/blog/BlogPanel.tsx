@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import type {
   BlogCommentDto, BlogCommentPageDto, BlogCommentStatus, BlogModerationItemDto, BlogPostDto,
   BlogPublicPostDetailDto, BlogPublicPostDto,
 } from "@aiwb/shared";
 import { api } from "../../lib/api";
+import { QK, invalidate } from "../../lib/query";
 import { Icon } from "../../lib/icons";
 import { usePanelStore } from "../../stores/panel";
 import { useAuthStore } from "../../stores/auth";
@@ -42,51 +44,39 @@ export default function BlogPanel() {
     history.replaceState(null, "", window.location.pathname + window.location.hash);
   }, []);
 
-  const [posts, setPosts] = useState<BlogPostDto[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [writeError, setWriteError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
-  const [comments, setComments] = useState<BlogCommentDto[]>([]);
-
-  const [queue, setQueue] = useState<BlogModerationItemDto[] | null>(null);
   const [filter, setFilter] = useState<BlogCommentStatus | "all">("pending");
   const [busyId, setBusyId] = useState<string | null>(null);
 
-  const reload = useCallback(async () => {
-    try {
-      setPosts(await api<BlogPostDto[]>("/blog/posts"));
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  }, []);
+  // 文章 / 审核队列 / 阅读页评论统一进 query 缓存：切回面板 30s 内零请求
+  const postsQuery = useQuery({
+    queryKey: QK.blogPosts,
+    queryFn: () => api<BlogPostDto[]>("/blog/posts"),
+  });
+  const posts = postsQuery.data ?? null;
+  const queueQuery = useQuery({
+    queryKey: QK.blogModeration(filter),
+    queryFn: () =>
+      api<BlogModerationItemDto[]>(`/blog/moderation/comments?status=${filter === "all" ? "" : filter}`),
+    enabled: canWrite,
+  });
+  const queue = queueQuery.data ?? null;
+  const commentsQuery = useQuery({
+    queryKey: QK.blogComments(openId ?? ""),
+    queryFn: () => api<BlogCommentDto[]>(`/blog/posts/${openId}/comments`),
+    enabled: !!openId,
+  });
+  const comments = commentsQuery.data ?? [];
 
-  const reloadQueue = useCallback(async (st: BlogCommentStatus | "all") => {
-    try {
-      setQueue(await api<BlogModerationItemDto[]>(`/blog/moderation/comments?status=${st === "all" ? "" : st}`));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-      setQueue([]);
-    }
-  }, []);
+  const error =
+    writeError ??
+    (postsQuery.error || queueQuery.error
+      ? (postsQuery.error ?? queueQuery.error)?.message ?? "读取失败"
+      : null);
 
-  useEffect(() => {
-    void reload();
-    // 审核队列仅站点主人可读
-    if (canWrite) void reloadQueue("pending");
-  }, [reload, reloadQueue, canWrite]);
-
-  // 阅读某篇：正文评论（只展示已通过）
-  useEffect(() => {
-    if (!openId) return;
-    let alive = true;
-    setComments([]);
-    api<BlogCommentDto[]>(`/blog/posts/${openId}/comments`)
-      .then((d) => alive && setComments(d))
-      .catch(() => alive && setComments([]));
-    return () => {
-      alive = false;
-    };
-  }, [openId]);
+  const reload = () => invalidate(QK.blogPosts);
+  const reloadQueue = (st: BlogCommentStatus | "all") => invalidate(QK.blogModeration(st));
 
   const cards = useMemo<BlogPublicPostDto[]>(
     () =>
@@ -160,10 +150,11 @@ export default function BlogPanel() {
         method: "PATCH",
         body: JSON.stringify({ status, note: status === "rejected" ? "不符合评论规范" : undefined }),
       });
+      setWriteError(null);
       await reloadQueue(filter);
       await reload();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setWriteError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusyId(null);
     }
@@ -177,9 +168,7 @@ export default function BlogPanel() {
       body: JSON.stringify(input),
     });
     if (c.status === "approved") {
-      const d = await api<BlogCommentDto[]>(`/blog/posts/${openId}/comments`).catch(() => []);
-      setComments(d);
-      void reload();
+      await invalidate(QK.blogComments(openId), QK.blogPosts);
     }
     return c;
   };
@@ -237,10 +226,7 @@ export default function BlogPanel() {
             className={`-mb-px flex items-center gap-1.5 border-b px-3 py-1.5 transition-colors ${
               tab === "moderation" ? "border-acc text-acc" : "border-transparent text-tx3 hover:text-tx2"
             }`}
-            onClick={() => {
-              setTab("moderation");
-              void reloadQueue(filter);
-            }}
+            onClick={() => setTab("moderation")}
           >
             <Icon name="comment" size={12} />
             评论审核
@@ -308,10 +294,7 @@ export default function BlogPanel() {
                 className={`rounded px-2 py-0.5 transition-colors ${
                   s === filter ? "bg-acc/10 text-acc" : "text-tx3 hover:text-acc"
                 }`}
-                onClick={() => {
-                  setFilter(s);
-                  void reloadQueue(s);
-                }}
+                onClick={() => setFilter(s)}
               >
                 {s === "all" ? "全部" : STATUS_META[s].label}
               </button>

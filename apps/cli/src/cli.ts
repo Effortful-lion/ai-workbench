@@ -74,7 +74,7 @@ ${modules.map((m) => `  ${pad(m, 8)} ${operationsOfModule(m).length} 个操作`)
 
 全局参数:
   --server <url>   后端地址（默认 ${DEFAULT_SERVER}）
-  --token <jwt>    临时覆盖凭证
+  --token <jwt>    临时覆盖凭证（不落盘、不自动续期）
   --data <json>    追加/覆盖请求体
   --yes            确认不可逆操作（delete 类）
   --raw            单行 JSON 输出
@@ -200,7 +200,12 @@ function resolveOperation(positionals: string[]): { op: OperationDef } | { modul
 async function runOperation(op: OperationDef, flags: Flags): Promise<number> {
   const cfg = loadConfig();
   if (str(flags, "server")) cfg.server = str(flags, "server") as string;
-  if (str(flags, "token")) cfg.token = str(flags, "token") as string;
+  if (str(flags, "token")) {
+    // 显式 --token 是临时覆盖：不落盘、不续期，避免把外来凭证写进本地
+    cfg.token = str(flags, "token") as string;
+    cfg.refreshToken = undefined;
+    cfg.noPersist = true;
+  }
   if (!cfg.token) usageErr("尚未登录：先执行 aiwb login --username <账号> --password <密码>");
 
   let path = op.path;
@@ -322,12 +327,16 @@ async function main(): Promise<void> {
       if (!username || !password) usageErr("用法：aiwb login --username <账号> --password <密码>");
       const data = (await callApi({ server: cfg.server }, "POST", "/auth/login", {
         body: { username, password },
-      })) as { user?: { username?: string; role?: string }; tokens?: { accessToken?: string } };
+      })) as {
+        user?: { username?: string; role?: string };
+        tokens?: { accessToken?: string; refreshToken?: string };
+      };
       const token = data.tokens?.accessToken;
       if (!token) throw new ApiError("登录响应缺少 accessToken", 500);
       saveConfig({
         server: cfg.server,
         token,
+        refreshToken: data.tokens?.refreshToken,
         username: data.user?.username,
         role: data.user?.role,
       });
@@ -338,6 +347,17 @@ async function main(): Promise<void> {
       return;
     }
     case "logout": {
+      // 先吊销服务端会话，再删本地文件；否则远端 refresh token 还能活 7 天
+      if (cfg.refreshToken && !cfg.noPersist) {
+        try {
+          await callApi({ server: cfg.server }, "POST", "/auth/logout", { body: { refreshToken: cfg.refreshToken } });
+        } catch (e) {
+          // 服务端不可达也要能退出本地，否则用户被锁死；但要如实告知
+          if (flags.quiet !== true) {
+            console.error(`! 服务端吊销失败：${e instanceof Error ? e.message : String(e)}（本地凭证仍会删除）`);
+          }
+        }
+      }
       clearConfig();
       if (flags.quiet !== true) console.log("✓ 已退出登录");
       return;

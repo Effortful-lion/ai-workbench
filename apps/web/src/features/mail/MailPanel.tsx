@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { QK, invalidate, queryClient } from "../../lib/query";
 import type {
   MailAccountDto,
   MailAttachmentDto,
@@ -90,9 +92,20 @@ export default function MailPanel() {
   const canAccess = role === "owner";
   const canWrite = canAccess;
 
-  const [accounts, setAccounts] = useState<MailAccountDto[]>([]);
-  const [digest, setDigest] = useState<MailDigestDto | null>(null);
-  const [messages, setMessages] = useState<MailMessageDto[]>([]);
+  // 摘要（账户 + 未读）与当前文件夹信件分别缓存，切回面板 30s 内零请求
+  const summaryQuery = useQuery({
+    queryKey: QK.mailSummary,
+    queryFn: async () => {
+      const [accounts, digest] = await Promise.all([
+        api<MailAccountDto[]>("/mail/accounts"),
+        api<MailDigestDto>("/mail/digest"),
+      ]);
+      return { accounts, digest };
+    },
+    enabled: canAccess,
+  });
+  const accounts = summaryQuery.data?.accounts ?? [];
+  const digest = summaryQuery.data?.digest ?? null;
   const [folder, setFolder] = useState<MailFolder>("inbox");
   const [category, setCategory] = useState<MailCategory | "all">("all");
   const [accountFilter, setAccountFilter] = useState<string | null>(null);
@@ -100,9 +113,17 @@ export default function MailPanel() {
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  const [loading, setLoading] = useState(true);
-  const [listLoading, setListLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const messagesQuery = useQuery({
+    queryKey: QK.mailMessages(folder),
+    queryFn: () => api<MailMessageDto[]>(`/mail/messages?folder=${folder}`),
+    enabled: canAccess,
+  });
+  const messages = messagesQuery.data ?? [];
+  const loading = summaryQuery.isLoading;
+  const listLoading = messagesQuery.isLoading;
+  // 保留 setError 名称给所有写操作；读错误合并进来
+  const [writeError, setError] = useState<string | null>(null);
+  const error = writeError ?? (summaryQuery.error ?? messagesQuery.error)?.message ?? null;
   const [notice, setNotice] = useState<string | null>(null);
   const [cmd, setCmd] = useState("");
   const [cmdError, setCmdError] = useState<string | null>(null);
@@ -164,46 +185,23 @@ export default function MailPanel() {
     [messages, selectedId],
   );
 
-  const reloadSummary = useCallback(async () => {
-    if (!canAccess) {
-      setLoading(false);
-      return;
-    }
-    try {
-      const [accs, dig] = await Promise.all([
-        api<MailAccountDto[]>("/mail/accounts"),
-        api<MailDigestDto>("/mail/digest"),
-      ]);
-      setAccounts(accs);
-      setDigest(dig);
-      setError(null);
-      // 通知顶栏邮件入口同步未读红点
-      window.dispatchEvent(new CustomEvent("aiwb:mail-changed", { detail: { unread: dig.unread } }));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoading(false);
-    }
-  }, [canAccess]);
-
+  /** 写操作 / 60s 轮询后失效缓存，后台重取一次 */
+  const reloadSummary = useCallback(
+    () => invalidate(QK.mailSummary, QK.mailDigest),
+    [],
+  );
   const loadMessages = useCallback(
-    async (f: MailFolder) => {
-      setListLoading(true);
-      try {
-        setMessages(await api<MailMessageDto[]>(`/mail/messages?folder=${f}`));
-        setError(null);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
-      } finally {
-        setListLoading(false);
-      }
-    },
+    (f: MailFolder) => invalidate(QK.mailMessages(f)),
     [],
   );
 
+  // 摘要变化（含后台刷新）同步顶栏邮件红点
   useEffect(() => {
-    void reloadSummary();
-  }, [reloadSummary]);
+    const unread = summaryQuery.data?.digest.unread;
+    if (typeof unread === "number") {
+      window.dispatchEvent(new CustomEvent("aiwb:mail-changed", { detail: { unread } }));
+    }
+  }, [summaryQuery.data?.digest.unread]);
 
   useEffect(() => {
     if (!canAccess) return;
@@ -211,8 +209,7 @@ export default function MailPanel() {
     setReplyBody("");
     setCategory("all");
     setUnreadOnly(false);
-    void loadMessages(folder);
-  }, [folder, canAccess, loadMessages]);
+  }, [folder, canAccess]);
 
   // 打开邮件面板时自动增量同步一次（会话内 3 分钟节流）。
   // 以前只有手动点「同步」，隔几天不开面板就会漏掉中间的信。
@@ -270,8 +267,14 @@ export default function MailPanel() {
           method: "PATCH",
           body: JSON.stringify({ isRead: true }),
         });
-        setMessages((prev) => prev.map((x) => (x.id === next.id ? next : x)));
-        setDigest((d) => (d ? { ...d, unread: Math.max(0, d.unread - 1), summary: d.summary } : d));
+        queryClient.setQueryData<MailMessageDto[]>(QK.mailMessages(folder), (prev) =>
+          prev?.map((x) => (x.id === next.id ? next : x)) ?? prev,
+        );
+        queryClient.setQueryData<{ accounts: MailAccountDto[]; digest: MailDigestDto }>(
+          QK.mailSummary,
+          (d) =>
+            d ? { ...d, digest: { ...d.digest, unread: Math.max(0, d.digest.unread - 1) } } : d,
+        );
         void reloadSummary();
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
@@ -287,14 +290,18 @@ export default function MailPanel() {
       });
       if ("folder" in patch) {
         // 移入其它文件夹后，从当前列表移除并清空阅读窗
-        setMessages((prev) => prev.filter((x) => x.id !== next.id));
+        queryClient.setQueryData<MailMessageDto[]>(QK.mailMessages(folder), (prev) =>
+          prev?.filter((x) => x.id !== next.id) ?? prev,
+        );
         if (selectedId === next.id) {
           setSelectedId(null);
           setReplyBody("");
         }
         await loadMessages(folder);
       } else {
-        setMessages((prev) => prev.map((x) => (x.id === next.id ? next : x)));
+        queryClient.setQueryData<MailMessageDto[]>(QK.mailMessages(folder), (prev) =>
+          prev?.map((x) => (x.id === next.id ? next : x)) ?? prev,
+        );
       }
       setNotice(`✓ ${msg}`);
       void reloadSummary();
@@ -306,7 +313,9 @@ export default function MailPanel() {
   const trashMessage = async (m: MailMessageDto) => {
     try {
       await api(`/mail/messages/${m.id}`, { method: "DELETE" });
-      setMessages((prev) => prev.filter((x) => x.id !== m.id));
+      queryClient.setQueryData<MailMessageDto[]>(QK.mailMessages(folder), (prev) =>
+        prev?.filter((x) => x.id !== m.id) ?? prev,
+      );
       if (selectedId === m.id) setSelectedId(null);
       const msg =
         m.folder === "trash" ? "已从原邮箱彻底删除" : "已移入原邮箱回收站";

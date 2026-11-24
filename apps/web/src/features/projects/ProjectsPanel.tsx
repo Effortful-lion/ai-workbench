@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { QK, invalidate, queryClient } from "../../lib/query";
 import type {
   ProjectDocDetailDto,
   ProjectDocDto,
@@ -64,15 +66,25 @@ export default function ProjectsPanel() {
   // 与原型 ACL 一致：owner rw，member ro；服务端 projects:read / projects:write 兜底
   const canWrite = role === "owner";
 
-  const [projects, setProjects] = useState<ProjectDto[]>([]);
+  const projectsQuery = useQuery({
+    queryKey: QK.projects,
+    queryFn: () => api<ProjectDto[]>("/projects"),
+  });
+  const projects = projectsQuery.data ?? [];
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [docs, setDocs] = useState<ProjectDocDto[]>([]);
+  const docsQuery = useQuery({
+    queryKey: QK.projectDocs(selectedId ?? ""),
+    queryFn: () => api<ProjectDocDto[]>(`/projects/${selectedId}/docs`),
+    enabled: !!selectedId,
+  });
+  const docs = docsQuery.data ?? [];
   const [detail, setDetail] = useState<ProjectDocDetailDto | null>(null);
   const [draft, setDraft] = useState("");
 
-  const [loading, setLoading] = useState(true);
-  const [docsLoading, setDocsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const loading = projectsQuery.isLoading;
+  const docsLoading = docsQuery.isLoading;
+  const [writeError, setWriteError] = useState<string | null>(null);
+  const error = writeError ?? (projectsQuery.error ?? docsQuery.error)?.message ?? null;
   const [notice, setNotice] = useState<string | null>(null);
   const [cmd, setCmd] = useState("");
   const [cmdError, setCmdError] = useState<string | null>(null);
@@ -80,46 +92,21 @@ export default function ProjectsPanel() {
 
   const selected = projects.find((p) => p.id === selectedId) ?? null;
 
-  const reloadProjects = useCallback(async () => {
-    try {
-      const list = await api<ProjectDto[]>("/projects");
-      setProjects(list);
-      setSelectedId((prev) =>
-        prev && list.some((p) => p.id === prev) ? prev : (list[0]?.id ?? null),
-      );
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const reloadProjects = () => invalidate(QK.projects);
+  const loadDocs = (projectId: string) => invalidate(QK.projectDocs(projectId));
 
-  const loadDocs = useCallback(async (projectId: string) => {
-    setDocsLoading(true);
-    try {
-      setDocs(await api<ProjectDocDto[]>(`/projects/${projectId}/docs`));
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setDocsLoading(false);
-    }
-  }, []);
-
+  // 列表回来后自动选中第一个项目（原来在 reloadProjects 里做）
   useEffect(() => {
-    void reloadProjects();
-  }, [reloadProjects]);
+    if (!projects.length) return;
+    setSelectedId((prev) =>
+      prev && projects.some((p) => p.id === prev) ? prev : (projects[0]?.id ?? null),
+    );
+  }, [projects]);
 
   useEffect(() => {
     setDetail(null);
     setDraft("");
-    if (!selectedId) {
-      setDocs([]);
-      return;
-    }
-    void loadDocs(selectedId);
-  }, [selectedId, loadDocs]);
+  }, [selectedId]);
 
   const openDoc = async (doc: ProjectDocDto) => {
     if (!selectedId) return;
@@ -127,9 +114,9 @@ export default function ProjectsPanel() {
       const d = await api<ProjectDocDetailDto>(`/projects/${selectedId}/docs/${doc.id}`);
       setDetail(d);
       setDraft(d.content);
-      setError(null);
+      setWriteError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setWriteError(e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -196,7 +183,7 @@ export default function ProjectsPanel() {
       setNotice(`✓ ${d.title} 已保存 · v${d.version}`);
       await Promise.all([loadDocs(selectedId), reloadProjects()]);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setWriteError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -209,10 +196,13 @@ export default function ProjectsPanel() {
         method: "PATCH",
         body: JSON.stringify({ status }),
       });
-      setProjects((prev) => prev.map((x) => (x.id === p.id ? p : x)));
+      queryClient.setQueryData<ProjectDto[]>(QK.projects, (prev) =>
+        prev?.map((x) => (x.id === p.id ? p : x)) ?? prev,
+      );
+      void invalidate(QK.projects);
       setNotice(`✓ ${p.name} → ${STATUS_LABEL[p.status]}`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setWriteError(e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -224,7 +214,7 @@ export default function ProjectsPanel() {
       setNotice(`✓ 项目 ${selected.name} 已删除`);
       await reloadProjects();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setWriteError(e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -239,7 +229,7 @@ export default function ProjectsPanel() {
       setNotice(`✓ 已删除 ${doc.title}`);
       await Promise.all([loadDocs(selectedId), reloadProjects()]);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setWriteError(e instanceof Error ? e.message : String(e));
     }
   };
 

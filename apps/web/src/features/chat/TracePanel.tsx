@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useChatStore } from "../../stores/chat";
 import { api } from "../../lib/api";
+import { QK } from "../../lib/query";
 import type { AgentExecutionTrace, TraceEvent } from "@aiwb/shared";
 
 /** 类型 → 终端颜色 */
@@ -111,7 +113,13 @@ function EventRow({ ev }: { ev: TraceEvent }) {
 export default function TracePanel() {
   const { traceEvents, streaming, currentId } = useChatStore();
   const [expanded, setExpanded] = useState(false);
-  const [history, setHistory] = useState<AgentExecutionTrace[]>([]);
+  // 恢复会话时按 conversationId 缓存迹线，切回同一会话不再重复请求
+  const { data: trace } = useQuery({
+    queryKey: QK.latestTrace(currentId ?? ""),
+    queryFn: () => api<AgentExecutionTrace | null>(`/agents/executions/latest?conversationId=${currentId}`),
+    enabled: !!currentId,
+  });
+  const history = trace && trace.events?.length ? [trace] : [];
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // streaming 时自动展开
@@ -123,14 +131,6 @@ export default function TracePanel() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [traceEvents.length]);
-
-  // 加载历史（恢复会话时）
-  useEffect(() => {
-    if (!currentId) { setHistory([]); return; }
-    api<AgentExecutionTrace | null>(`/agents/executions/latest?conversationId=${currentId}`)
-      .then((t) => { if (t && t.events?.length) setHistory([t]); })
-      .catch(() => {});
-  }, [currentId]);
 
   // ═══ 折叠态：紧凑摘要条 ═══
   if (!expanded) {

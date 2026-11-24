@@ -1,22 +1,18 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import type { AgentExecutionTrace, TraceEvent } from "@aiwb/shared";
 import { api } from "../../lib/api";
+import { QK } from "../../lib/query";
 import { useAgentsStore } from "../../stores/agents";
 
 /** 全局执行历史面板：最近 30 次 Agent 运行的 cost + trace 速览 */
 export default function HistoryPanel() {
   const agents = useAgentsStore((s) => s.agents);
-  const [traces, setTraces] = useState<AgentExecutionTrace[]>([]);
+  const { data: traces = [], isLoading: loading, refetch } = useQuery({
+    queryKey: QK.executions,
+    queryFn: () => api<AgentExecutionTrace[]>("/agents/executions?limit=50"),
+  });
   const [expanded, setExpanded] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    setLoading(true);
-    api<AgentExecutionTrace[]>("/agents/executions?limit=50")
-      .then(setTraces)
-      .catch(() => setTraces([]))
-      .finally(() => setLoading(false));
-  }, []);
 
   const agentName = (id: string | null) =>
     id ? agents.find((a) => a.id === id)?.name ?? id.slice(0, 8) + "…" : "直跑模式";
@@ -34,7 +30,7 @@ export default function HistoryPanel() {
         <div className="text-xs text-tx3">~/history · 执行历史 · 最近 {traces.length} 条</div>
         <button
           className="rounded border border-line px-2.5 py-1 text-[11px] text-tx2 hover:border-acc hover:text-acc"
-          onClick={() => window.location.reload()}
+          onClick={() => void refetch()}
         >
           ↻ 刷新
         </button>

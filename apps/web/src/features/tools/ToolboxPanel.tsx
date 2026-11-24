@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
+import { useQuery } from "@tanstack/react-query";
 import type { ToolboxItemDto, ToolboxKind } from "@aiwb/shared";
 import { api } from "../../lib/api";
+import { QK, queryClient, invalidate } from "../../lib/query";
 import { useAuthStore } from "../../stores/auth";
 import ToolboxWall from "./ToolboxWall";
 
@@ -73,9 +75,14 @@ export default function ToolboxPanel() {
   // 与原型 ACL 一致：owner rw，member ro；服务端 tools:read / tools:write 兜底
   const canWrite = role === "owner";
 
-  const [items, setItems] = useState<ToolboxItemDto[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const itemsQuery = useQuery({
+    queryKey: QK.toolbox,
+    queryFn: () => api<ToolboxItemDto[]>("/toolbox/items"),
+  });
+  const items = itemsQuery.data ?? [];
+  const loading = itemsQuery.isLoading;
+  const [writeError, setWriteError] = useState<string | null>(null);
+  const error = writeError ?? itemsQuery.error?.message ?? null;
   const [notice, setNotice] = useState<string | null>(null);
 
   // 表单 / 命令两种录入方式
@@ -98,12 +105,9 @@ export default function ToolboxPanel() {
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
 
-  useEffect(() => {
-    api<ToolboxItemDto[]>("/toolbox/items")
-      .then(setItems)
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
-      .finally(() => setLoading(false));
-  }, []);
+  /** 写操作后先改缓存（即时反馈），再按 key 失效做后台校准 */
+  const setCachedItems = (fn: (prev: ToolboxItemDto[]) => ToolboxItemDto[]) =>
+    queryClient.setQueryData<ToolboxItemDto[]>(QK.toolbox, (prev) => (prev ? fn(prev) : prev));
 
   const finalCategory = category === "__custom" ? customCategory.trim() || "misc" : category;
 
@@ -167,7 +171,8 @@ export default function ToolboxPanel() {
         if (desc.trim()) fd.append("desc", desc.trim());
         item = await api<ToolboxItemDto>("/toolbox/items/upload", { method: "POST", body: fd });
       }
-      setItems((prev) => [item, ...prev]);
+      setCachedItems((prev) => [item, ...prev]);
+      void invalidate(QK.toolbox);
       resetForm();
       setShowAdd(false);
       setNotice(
@@ -195,7 +200,8 @@ export default function ToolboxPanel() {
         method: "POST",
         body: JSON.stringify(parsed),
       });
-      setItems((prev) => [item, ...prev]);
+      setCachedItems((prev) => [item, ...prev]);
+      void invalidate(QK.toolbox);
       setCmd("");
       setShowAdd(false);
       setNotice(`✓ alias.${item.name} #${item.category} 已加入（链接）`);
@@ -211,7 +217,7 @@ export default function ToolboxPanel() {
     window.open(item.url, "_blank", "noopener,noreferrer");
     void api<{ useCount: number }>(`/toolbox/items/${item.id}/use`, { method: "POST" })
       .then(({ useCount }) =>
-        setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, useCount } : i))),
+        setCachedItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, useCount } : i))),
       )
       .catch(() => {
         /* 计数失败不影响打开 */
@@ -222,10 +228,11 @@ export default function ToolboxPanel() {
     if (!window.confirm(`从百宝箱移除 alias.${item.name}？`)) return;
     try {
       await api(`/toolbox/items/${item.id}`, { method: "DELETE" });
-      setItems((prev) => prev.filter((i) => i.id !== item.id));
+      setCachedItems((prev) => prev.filter((i) => i.id !== item.id));
+      void invalidate(QK.toolbox);
       setNotice(`✓ 已移除 alias.${item.name}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setWriteError(err instanceof Error ? err.message : String(err));
     }
   };
 

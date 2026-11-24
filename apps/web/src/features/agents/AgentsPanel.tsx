@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { DEFAULT_AGENT_BUDGET, type AgentBudget, type AgentDto, type AgentPhase, type ModelDto } from "@aiwb/shared";
 import type { ToolSchemaDto } from "@aiwb/shared";
 import { api } from "../../lib/api";
+import { QK } from "../../lib/query";
 import { useAgentsStore } from "../../stores/agents";
 import { useChatStore } from "../../stores/chat";
 import { usePanelStore } from "../../stores/panel";
@@ -45,7 +47,10 @@ export default function AgentsPanel() {
   const closeAll = usePanelStore((s) => s.closeAll);
   const [form, setForm] = useState<FormState | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [models, setModels] = useState<ModelDto[]>([]);
+  const { data: models = [] } = useQuery({
+    queryKey: QK.models,
+    queryFn: () => api<ModelDto[]>("/models"),
+  });
   const [collapsedMods, setCollapsedMods] = useState<Set<string>>(new Set());
 
   // tools 按模块分组（useMemo 避免每次 render 重建）
@@ -60,7 +65,6 @@ export default function AgentsPanel() {
 
   useEffect(() => {
     void load();
-    api<ModelDto[]>("/models").then(setModels).catch(() => {});
   }, [load]);
 
   /** 用户点 + 新建：如果有 draft，提示恢复 */

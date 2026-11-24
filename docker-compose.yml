@@ -1,0 +1,72 @@
+# ai-workbench 基础设施统一编排（单一 compose，便于管理）
+#
+# 项目名固定为 aiwb，因此容器 / 网络前缀均为 aiwb-*（如 aiwb-qdrant、aiwb-minio）。
+# 所有绑定挂载的宿主机路径都指向项目内的现有数据目录，确保合并后既有数据不丢失。
+#
+# 用法：
+#   docker compose up -d          # 启动全部
+#   docker compose up -d qdrant  # 仅启动某个服务
+#   docker compose stop          # 停止（保留容器与数据）
+#   docker compose down          # 停止并移除容器（数据卷仍在宿主机）
+
+name: aiwb
+
+services:
+  # 向量库（KB 检索，默认 provider=qdrant）
+  qdrant:
+    image: qdrant/qdrant
+    ports:
+      - "6333:6333"
+    volumes:
+      - ./data/qdrant:/qdrant/storage
+    restart: unless-stopped
+
+  # 对象存储（MinIO S3 API）
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    ports:
+      - "9700:9000" # S3 API
+      - "9701:9001" # Web 控制台
+    # 管理员凭据复用网站级 .env（ADMIN_USER / ADMIN_PASS），单一来源
+    env_file: .env
+    environment:
+      MINIO_ROOT_USER: ${ADMIN_USER}
+      MINIO_ROOT_PASSWORD: ${ADMIN_PASS}
+    volumes:
+      - ./services/minio/data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # 本地推理（LightRAG 的 LLM / embedding 后端）
+  ollama:
+    image: ollama/ollama:latest
+    environment:
+      # 默认 num_parallel=1，并发 embedding 请求会排队导致 LightRAG 60s worker 超时
+      - OLLAMA_NUM_PARALLEL=8
+      # 避免模型冷启动造成首次 flush 大面积超时
+      - OLLAMA_KEEP_ALIVE=24h
+    volumes:
+      # 模型数据存放在项目目录内，便于直接定位
+      - ./services/lightrag/data/ollama_models:/root/.ollama
+    restart: unless-stopped
+
+  # 图谱 RAG（KB_PROVIDER=lightrag 时启用）
+  lightrag:
+    image: ghcr.io/hkuds/lightrag:latest
+    ports:
+      - "9621:9621"
+    env_file: .env
+    extra_hosts:
+      # 允许 LLM_BINDING_HOST 指向宿主机服务（备用）
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./services/lightrag/data/rag_storage:/app/data/rag_storage
+      - ./services/lightrag/data/inputs:/app/data/inputs
+    depends_on:
+      - ollama
+    restart: unless-stopped
